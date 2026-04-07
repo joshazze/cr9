@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Full bleed cream (maskable: edges get cropped, center 80% must contain the mark) -->
+  <rect x="0" y="0" width="512" height="512" fill="#faf9f6"/>
+
+  <!-- All meaningful content scaled into the center 80% (circle radius <= ~205 within 256 center).
+       We place the emblem within a safe circle of r=200 centered at (256,256). -->
+
+  <!-- Thin copper outer ring -->
+  <circle cx="256" cy="256" r="168" fill="none" stroke="#c15f3c" stroke-width="5" opacity="0.35"/>
+  <circle cx="256" cy="256" r="158" fill="none" stroke="#c15f3c" stroke-width="2" opacity="0.5"/>
+
+  <!-- Central copper emblem circle (smaller for safe zone) -->
+  <circle cx="256" cy="256" r="140" fill="#c15f3c"/>
+
+  <!-- Inner cream ring -->
+  <circle cx="256" cy="256" r="126" fill="none" stroke="#faf9f6" stroke-width="3" opacity="0.6"/>
+
+  <!-- Big serif "9" centered -->
+  <text x="256" y="256"
+        font-family="New York, Times New Roman, Georgia, serif"
+        font-size="230"
+        font-weight="600"
+        fill="#faf9f6"
+        text-anchor="middle"
+        dominant-baseline="central">9</text>
+
+  <!-- Gold decorative star -->
+  <g transform="translate(336,190)" fill="#d4a27f">
+    <path d="M0,-18 C2.5,-6.5 6.5,-2.5 18,0 C6.5,2.5 2.5,6.5 0,18 C-2.5,6.5 -6.5,2.5 -18,0 C-6.5,-2.5 -2.5,-6.5 0,-18 Z"/>
+  </g>
+
+  <!-- Tiny asterisk accent -->
+  <g transform="translate(176,322)" fill="#d4a27f" opacity="0.85">
+    <path d="M0,-8 C1.1,-2.8 2.8,-1.1 8,0 C2.8,1.1 1.1,2.8 0,8 C-1.1,2.8 -2.8,1.1 -8,0 C-2.8,-1.1 -1.1,-2.8 0,-8 Z"/>
+  </g>
+</svg>

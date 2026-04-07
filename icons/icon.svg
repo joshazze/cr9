@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Cream background (full bleed rounded square) -->
+  <defs>
+    <clipPath id="rounded">
+      <rect x="0" y="0" width="512" height="512" rx="96" ry="96"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#rounded)">
+    <rect x="0" y="0" width="512" height="512" fill="#faf9f6"/>
+
+    <!-- Thin copper outer ring -->
+    <circle cx="256" cy="256" r="220" fill="none" stroke="#c15f3c" stroke-width="6" opacity="0.35"/>
+    <circle cx="256" cy="256" r="208" fill="none" stroke="#c15f3c" stroke-width="2" opacity="0.5"/>
+
+    <!-- Central copper emblem circle -->
+    <circle cx="256" cy="256" r="180" fill="#c15f3c"/>
+
+    <!-- Inner cream ring giving depth -->
+    <circle cx="256" cy="256" r="162" fill="none" stroke="#faf9f6" stroke-width="3" opacity="0.6"/>
+
+    <!-- Big serif "9" centered -->
+    <text x="256" y="256"
+          font-family="New York, Times New Roman, Georgia, serif"
+          font-size="300"
+          font-weight="600"
+          fill="#faf9f6"
+          text-anchor="middle"
+          dominant-baseline="central">9</text>
+
+    <!-- Small gold decorative star (Anthropic-esque burst) upper right of 9 -->
+    <g transform="translate(360,170)" fill="#d4a27f">
+      <path d="M0,-22 C3,-8 8,-3 22,0 C8,3 3,8 0,22 C-3,8 -8,3 -22,0 C-8,-3 -3,-8 0,-22 Z"/>
+    </g>
+
+    <!-- Tiny asterisk accent bottom-left for balance -->
+    <g transform="translate(150,360)" fill="#d4a27f" opacity="0.85">
+      <path d="M0,-10 C1.4,-3.5 3.5,-1.4 10,0 C3.5,1.4 1.4,3.5 0,10 C-1.4,3.5 -3.5,1.4 -10,0 C-3.5,-1.4 -1.4,-3.5 0,-10 Z"/>
+    </g>
+  </g>
+</svg>

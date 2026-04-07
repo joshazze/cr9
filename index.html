@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#faf9f6" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#262624" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="CR9">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="manifest" href="manifest.json">
+  <title>CR9 · Ibmec</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <header>
+      <div class="hdr-row">
+        <h1 class="hdr-title">CR9</h1>
+        <span class="hdr-sub">Ibmec</span>
+      </div>
+      <p class="hdr-tagline">seu controle do Ibmec Stars.</p>
+      <p class="hdr-meta" id="hdr-meta"></p>
+    </header>
+
+    <nav class="tabs">
+      <button class="tab active" data-goto="s-home">Home</button>
+      <button class="tab" data-goto="s-disciplinas">Disciplinas</button>
+      <button class="tab" data-goto="s-simulador">Simulador</button>
+    </nav>
+
+    <!-- HOME -->
+    <div id="s-home" class="screen active">
+      <div class="stars-hero" id="stars-hero">
+        <div class="stars-ring" id="stars-ring">
+          <svg viewBox="0 0 120 120">
+            <circle class="ring-bg" cx="60" cy="60" r="52"/>
+            <circle class="ring-fill" cx="60" cy="60" r="52" pathLength="100" stroke-dasharray="100 100" stroke-dashoffset="100" id="ring-fill"/>
+          </svg>
+          <div class="stars-ring-inner">
+            <div class="stars-ring-num" id="stars-num">0</div>
+            <div class="stars-ring-den" id="stars-den">/ 450</div>
+          </div>
+        </div>
+        <div class="stars-info">
+          <h2>Ibmec Stars</h2>
+          <p class="stars-sub">CR 9,0 equivale a 450 pontos de 500 no período.</p>
+          <span class="stars-status" id="stars-status">Em progresso</span>
+          <p class="stars-hint" id="stars-hint">crie suas disciplinas pra começar</p>
+        </div>
+      </div>
+
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <div class="metric-label">Pontos distribuídos</div>
+          <div class="metric-value"><span id="pts-dist">0</span><span class="metric-unit"> / <span id="pts-total">500</span></span></div>
+          <div class="bar"><div class="bar-fill accent" id="bar-dist"></div></div>
+          <div class="metric-hint" id="dist-hint">nada lançado ainda</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Aproveitamento</div>
+          <div class="metric-value" id="aprov-pct">—</div>
+          <div class="bar"><div class="bar-fill" id="bar-aprov"></div></div>
+          <div class="metric-hint" id="aprov-hint">nada para calcular</div>
+        </div>
+      </div>
+
+      <div class="tp-card">
+        <div>
+          <div class="metric-label">Teste de Progresso</div>
+          <div class="metric-value" id="tp-bonus">— pts</div>
+          <div class="metric-hint" id="tp-hint">sem nota lançada</div>
+        </div>
+        <button class="btn secondary sm" id="btn-edit-tp">Editar</button>
+      </div>
+
+      <div class="breakdown">
+        <h3>Por disciplina</h3>
+        <div id="bd-body">
+          <p class="hint">crie disciplinas pra ver o detalhamento</p>
+        </div>
+        <div class="bd-legend">
+          <span><span class="dot"></span> ganhos</span>
+          <span><span class="dot soft"></span> distribuídos</span>
+        </div>
+      </div>
+
+      <h3 class="stitle">Lançamentos recentes</h3>
+      <ul id="lista-recentes" class="list">
+        <li class="empty">nenhum lançamento ainda</li>
+      </ul>
+    </div>
+
+    <!-- DISCIPLINAS -->
+    <div id="s-disciplinas" class="screen">
+      <div class="row-between">
+        <h3 class="stitle">Minhas disciplinas</h3>
+        <button class="btn primary sm" id="btn-add-disc">+ nova</button>
+      </div>
+      <ul id="lista-disciplinas" class="list">
+        <li class="empty">nenhuma disciplina. toca em <strong>+ nova</strong>.</li>
+      </ul>
+    </div>
+
+    <!-- DETALHE -->
+    <div id="s-detalhe" class="screen">
+      <button class="btn-back" data-goto="s-disciplinas">← disciplinas</button>
+      <div class="hdr-det">
+        <h3 class="stitle" id="det-nome">—</h3>
+        <button class="btn danger sm" id="btn-del-disc">excluir</button>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-label">Pontos desta disciplina</div>
+        <div class="metric-value"><span id="det-earned">0</span><span class="metric-unit"> / <span id="det-dist">0</span> de 100</span></div>
+        <div class="bar"><div class="bar-fill" id="det-bar"></div></div>
+        <div class="metric-hint" id="det-status">sem notas</div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">AP1 <span class="section-max">máx 40</span></div>
+        <div class="grade-row" id="row-ap1"></div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">AP2 <span class="section-max">máx 40</span></div>
+        <div class="grade-row" id="row-ap2"></div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Atividades Complementares <span class="section-max">máx 20 total</span></div>
+        <ul id="lista-acs" class="list tight"></ul>
+        <button class="btn secondary sm" id="btn-add-ac" style="margin-top:10px">+ atividade</button>
+      </div>
+
+      <div class="section" id="sec-as">
+        <div class="section-title">AS <span class="section-max">substitui pior AP</span></div>
+        <p class="hint" id="as-info">AS só libera quando o total da disciplina está abaixo de 70. Marcar AS oficial elimina sua elegibilidade ao Stars.</p>
+        <div class="grade-row" id="row-as" hidden></div>
+      </div>
+    </div>
+
+    <!-- SIMULADOR -->
+    <div id="s-simulador" class="screen">
+      <h3 class="stitle">Simulador Stars</h3>
+      <p class="hint">preencha notas hipotéticas nos campos vazios. nada é salvo — é só pra ver o cenário.</p>
+      <div id="sim-body"></div>
+      <div class="metric-card">
+        <div class="metric-label">Simulação</div>
+        <div class="metric-value"><span id="sim-total">0</span><span class="metric-unit"> / <span id="sim-max">500</span></span></div>
+        <div class="bar"><div class="bar-fill" id="sim-bar"></div></div>
+        <div class="metric-hint" id="sim-hint">—</div>
+      </div>
+      <div class="btn-row">
+        <button class="btn secondary sm" id="btn-reset-sim">resetar</button>
+        <button class="btn sm" id="btn-fill-max-sim">preencher máximos</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="modal" hidden>
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-sheet">
+      <div class="modal-header">
+        <button class="btn-link" data-close>cancelar</button>
+        <span class="modal-title" id="modal-title">—</span>
+        <button class="btn-link bold" id="modal-save">salvar</button>
+      </div>
+      <div class="modal-body" id="modal-body"></div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
