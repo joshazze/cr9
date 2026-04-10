@@ -20,6 +20,124 @@ function escapeHTML(s) {
   }[c]));
 }
 
+// ───────── SAUDAÇÃO ─────────
+
+const GREET_BY_TIME = {
+  madrugada: [
+    'madrugada e tu aqui',
+    'varando a madrugada',
+    'insônia produtiva',
+    'essa hora, hein',
+    'madrugada pensante',
+    'de olho nos pontos nessa hora',
+    'tá voando na madrugada'
+  ],
+  manha: [
+    'bom dia',
+    'bom dia, meu consagrado',
+    'manhã boa',
+    'manhã produtiva',
+    'acordou ligado',
+    'começando o dia',
+    'dia novo',
+    'bora pro dia',
+    'manhã no ataque'
+  ],
+  tarde: [
+    'boa tarde',
+    'tarde boa',
+    'tarde produtiva',
+    'meio-dia, meio-caminho',
+    'tarde, feroz',
+    'bora pra reta da tarde',
+    'tarde operando'
+  ],
+  noite: [
+    'boa noite',
+    'noite boa',
+    'fechando o dia',
+    'final de expediente',
+    'noite operando',
+    'noite de revisão',
+    'noite tranquila',
+    'encerrando o dia'
+  ]
+};
+
+const GREET_NEUTRAL = [
+  'fala',
+  'e aí',
+  'salve',
+  'opa',
+  'alô',
+  'chegou'
+];
+
+const GREET_VOCATIVOS = [
+  'champs',
+  'monstro',
+  'mestre',
+  'chefe',
+  'lenda',
+  'feroz',
+  'cria',
+  'patrão',
+  'guerreiro',
+  'craque',
+  'brabo',
+  'parceiro',
+  'ídolo',
+  'fenômeno',
+  'rei',
+  'tropa',
+  'maestro'
+];
+
+const GREET_TAILS = [
+  'brutal hoje?',
+  'só força?',
+  'tudo em ordem?',
+  'bora dominar?',
+  'no controle?',
+  'firmeza?',
+  'tá voando?',
+  'tudo certo por aí?',
+  'bora pros pontos?',
+  'stars no radar?',
+  'pé no acelerador?',
+  'no ritmo?',
+  'focado?',
+  'em modo operação?',
+  'cabeça no jogo?',
+  'tudo afiado?',
+  'no clima?',
+  'preparado?',
+  'tudo sob controle?',
+  'bora olhar esses números?',
+  'firme e forte?',
+  'com tudo?'
+];
+
+function pickRandom(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+function getSaudacao() {
+  const h = new Date().getHours();
+  let bucket;
+  if (h < 5) bucket = GREET_BY_TIME.madrugada;
+  else if (h < 12) bucket = GREET_BY_TIME.manha;
+  else if (h < 18) bucket = GREET_BY_TIME.tarde;
+  else bucket = GREET_BY_TIME.noite;
+
+  const useNeutral = Math.random() < 0.3;
+  const opener = useNeutral ? pickRandom(GREET_NEUTRAL) : pickRandom(bucket);
+  const voc = pickRandom(GREET_VOCATIVOS);
+  const tail = pickRandom(GREET_TAILS);
+  const raw = opener + ' ' + voc + ', ' + tail;
+  return raw.charAt(0).toUpperCase() + raw.slice(1);
+}
+
 function loadState() {
   try {
     const raw = localStorage.getItem(KEY);
@@ -139,6 +257,155 @@ function calcPeriodo(sim = {}) {
   };
 }
 
+function normalCdf(z) {
+  if (z < -6) return 0;
+  if (z > 6) return 1;
+  const t = 1 / (1 + 0.2316419 * Math.abs(z));
+  const d = 0.3989422804014327 * Math.exp(-z * z / 2);
+  const poly = t * (0.319381530 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))));
+  const tail = d * poly;
+  return z >= 0 ? 1 - tail : tail;
+}
+
+function calcStarsProbability(p) {
+  if (p.n === 0) return { state: 'empty' };
+  if (!p.starsEligible) return { state: 'out' };
+  if (p.distReg === 0) return { state: 'nodata' };
+
+  const remaining = Math.max(0, p.total - p.distReg);
+  const need = p.starsNeeded - p.totalScore;
+
+  if (need <= 0) {
+    return { state: 'locked', remaining, need: 0, rate: (p.earnedReg / p.distReg) * 100, projected: p.totalScore };
+  }
+  if (need > remaining) {
+    const maxPossible = p.totalScore + remaining;
+    return { state: 'impossible', remaining, need, rate: (p.earnedReg / p.distReg) * 100, projected: maxPossible };
+  }
+
+  const rate = p.earnedReg / p.distReg;
+  const needRate = need / remaining;
+
+  // Normal approximation with shrinkage: more distributed points → tighter variance.
+  // Aleatoric term: remaining * rate * (1-rate) treats each "point slot" as Bernoulli-ish.
+  // Epistemic term: rate itself is uncertain — inflate by (1 + remaining/distReg).
+  const shrinkage = 1 + remaining / p.distReg;
+  const variance = Math.max(remaining * rate * (1 - rate) * shrinkage, 1);
+  const sigma = Math.sqrt(variance);
+  const mean = remaining * rate;
+  const z = (mean - need) / sigma;
+  const prob = normalCdf(z);
+  const pct = Math.max(0, Math.min(100, prob * 100));
+
+  return {
+    state: 'computed',
+    pct,
+    rate: rate * 100,
+    needRate: needRate * 100,
+    projected: p.totalScore + mean,
+    remaining,
+    need
+  };
+}
+
+function renderProbCard(p) {
+  const prob = calcStarsProbability(p);
+  const pctEl = document.getElementById('prob-pct');
+  const barEl = document.getElementById('prob-bar');
+  const statusEl = document.getElementById('prob-status');
+  const projEl = document.getElementById('prob-proj');
+  const needEl = document.getElementById('prob-need');
+  const rateEl = document.getElementById('prob-rate');
+  const hintEl = document.getElementById('prob-hint');
+
+  const reset = () => {
+    pctEl.textContent = '—';
+    barEl.style.width = '0%';
+    barEl.className = 'bar-fill';
+    statusEl.className = 'stars-status';
+    projEl.textContent = '—';
+    needEl.textContent = '—';
+    rateEl.textContent = '—';
+  };
+
+  if (prob.state === 'empty') {
+    reset();
+    statusEl.textContent = 'sem disciplinas';
+    hintEl.textContent = 'crie disciplinas pra estimar';
+    return;
+  }
+  if (prob.state === 'nodata') {
+    reset();
+    statusEl.textContent = 'sem dados';
+    needEl.textContent = fmtNum(p.starsNeeded, 0) + ' pts';
+    hintEl.textContent = 'lance alguma nota pra começar o cálculo';
+    return;
+  }
+  if (prob.state === 'out') {
+    reset();
+    pctEl.textContent = '0';
+    barEl.style.width = '100%';
+    barEl.className = 'bar-fill danger';
+    statusEl.textContent = 'fora';
+    statusEl.className = 'stars-status out';
+    projEl.textContent = fmtNum(p.totalScore, 0) + ' pts';
+    rateEl.textContent = p.aprov !== null ? fmtNum(p.aprov, 1) + '%' : '—';
+    hintEl.textContent = 'AS oficial elimina você do Stars — sem chance estatística';
+    return;
+  }
+  if (prob.state === 'locked') {
+    pctEl.textContent = '100';
+    barEl.style.width = '100%';
+    barEl.className = 'bar-fill success';
+    statusEl.textContent = 'garantido';
+    statusEl.className = 'stars-status in';
+    projEl.textContent = fmtNum(prob.projected, 0) + ' pts';
+    needEl.textContent = '0 pts';
+    rateEl.textContent = fmtNum(prob.rate, 1) + '%';
+    hintEl.textContent = 'já passou de ' + p.starsNeeded + ' pontos — Stars travado';
+    return;
+  }
+  if (prob.state === 'impossible') {
+    pctEl.textContent = '0';
+    barEl.style.width = '100%';
+    barEl.className = 'bar-fill danger';
+    statusEl.textContent = 'impossível';
+    statusEl.className = 'stars-status out';
+    projEl.textContent = 'máx ' + fmtNum(prob.projected, 0) + ' pts';
+    needEl.textContent = fmtNum(prob.need, 0) + ' pts';
+    rateEl.textContent = fmtNum(prob.rate, 1) + '%';
+    hintEl.textContent = 'faltam mais pontos do que ainda dá pra distribuir';
+    return;
+  }
+
+  // computed
+  pctEl.textContent = fmtNum(prob.pct, 1);
+  barEl.style.width = Math.max(2, Math.min(100, prob.pct)) + '%';
+
+  let band, label, cls;
+  if (prob.pct >= 85) { band = 'success'; label = 'tranquilo'; cls = 'in'; }
+  else if (prob.pct >= 60) { band = 'success'; label = 'provável'; cls = 'in'; }
+  else if (prob.pct >= 35) { band = 'warning'; label = 'apertado'; cls = ''; }
+  else if (prob.pct >= 10) { band = 'warning'; label = 'difícil'; cls = 'out'; }
+  else { band = 'danger'; label = 'improvável'; cls = 'out'; }
+
+  barEl.className = 'bar-fill ' + band;
+  statusEl.textContent = label;
+  statusEl.className = 'stars-status' + (cls ? ' ' + cls : '');
+
+  projEl.textContent = fmtNum(prob.projected, 0) + ' pts';
+  const needRateTxt = fmtNum(prob.needRate, 0) + '%';
+  needEl.textContent = needRateTxt + ' de ' + fmtNum(prob.remaining, 0);
+  rateEl.textContent = fmtNum(prob.rate, 1) + '%';
+
+  if (prob.needRate <= prob.rate) {
+    hintEl.textContent = 'mantendo seu rendimento, você chega lá — ' + fmtNum(prob.pct, 0) + '% de chance';
+  } else {
+    const gap = prob.needRate - prob.rate;
+    hintEl.textContent = 'precisa subir ' + fmtNum(gap, 0) + ' pts% no rendimento pros ' + fmtNum(prob.remaining, 0) + ' restantes';
+  }
+}
+
 function discStatus(d) {
   const r = calcDisc(d);
   if (r.dist === 0) return '';
@@ -214,6 +481,9 @@ function renderHome() {
   } else {
     hintEl.innerHTML = 'faltam <strong>' + fmtNum(p.starsNeeded - p.totalScore, 1) + '</strong> pontos — ainda dá';
   }
+
+  // Probabilidade estatística do Stars
+  renderProbCard(p);
 
   // Pontos distribuídos
   document.getElementById('pts-dist').textContent = fmtNum(p.distReg, 1);
@@ -846,7 +1116,8 @@ document.getElementById('btn-fill-max-sim').addEventListener('click', () => {
   renderSimulador();
 });
 
-// Header meta date
+// Header saudação + meta date
+document.getElementById('hdr-tagline').textContent = getSaudacao();
 document.getElementById('hdr-meta').textContent =
   new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' });
 
