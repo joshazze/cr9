@@ -80,7 +80,6 @@ const GREET_VOCATIVOS = [
   'chefe',
   'lenda',
   'feroz',
-  'cria',
   'patrão',
   'guerreiro',
   'craque',
@@ -89,9 +88,67 @@ const GREET_VOCATIVOS = [
   'ídolo',
   'fenômeno',
   'rei',
-  'tropa',
   'maestro'
 ];
+
+const GREET_FREEFORM = {
+  any: [
+    'voltou pra operação',
+    'bora ver se os números tão jogando a favor hoje',
+    'o Stars não se conquista sozinho — mas hoje tem você',
+    'hoje o rendimento pede café e coragem',
+    'cada ponto conta, e você sabe disso',
+    'sem desculpa hoje — só execução',
+    'tá na hora de olhar os pontos no olho',
+    'a matemática não mente — vamos nela',
+    'cada lançamento te aproxima dos 450',
+    'foco cirúrgico no período',
+    '450 pontos não caem do céu — a gente busca',
+    'hoje é dia de transformar estudo em pontos',
+    'reta final começa quando você decide',
+    'o Stars te espera — e ele não tem pressa, mas você tem',
+    'disciplina hoje, orgulho amanhã',
+    'a régua tá em 90 — e a gente vai passar por cima',
+    'nada de aproveitamento morno por aqui',
+    'tá tudo ao seu alcance — literalmente, nessa tela',
+    'hoje é outro dia pra bater meta',
+    'os pontos não vão se lançar sozinhos',
+    'que hoje a estatística jogue a seu favor',
+    'bem-vindo de volta ao comando',
+    'as notas contam a história — e você é o autor',
+    'cada AP é uma batalha, o Stars é a guerra'
+  ],
+  manha: [
+    'o dia começou — e os pontos também',
+    'manhã fresca, cabeça afiada',
+    'cafezinho e rumo aos 450',
+    'bom dia pra quem vai virar Stars',
+    'acordou e já tá no controle',
+    'primeiro movimento do dia: checar as notas'
+  ],
+  tarde: [
+    'meio do dia, meio dos pontos — vamos fechar bem',
+    'a tarde é longa, o Stars é mais',
+    'almoço resolvido, agora é estratégia',
+    'tarde produtiva = Stars no horizonte',
+    'hora de revisar o placar'
+  ],
+  noite: [
+    'o dia tá fechando mas o Stars continua aberto',
+    'noite boa pra revisar o que rolou',
+    'um último olhar antes de desligar',
+    'dia longo, mas os pontos não dormem',
+    'fechou o expediente? abre o CR9',
+    'a noite é jovem, o Stars também'
+  ],
+  madrugada: [
+    'madrugada varando, disciplina no talo',
+    'essa hora só tem você e os números',
+    'quem estuda de madrugada vira Stars de manhã',
+    'silêncio bom pra pensar nos pontos',
+    'o mundo dorme, o CR acorda'
+  ]
+};
 
 const GREET_TAILS = [
   'brutal hoje?',
@@ -124,17 +181,25 @@ function pickRandom(arr) {
 
 function getSaudacao() {
   const h = new Date().getHours();
-  let bucket;
-  if (h < 5) bucket = GREET_BY_TIME.madrugada;
-  else if (h < 12) bucket = GREET_BY_TIME.manha;
-  else if (h < 18) bucket = GREET_BY_TIME.tarde;
-  else bucket = GREET_BY_TIME.noite;
+  let timeKey;
+  if (h < 5) timeKey = 'madrugada';
+  else if (h < 12) timeKey = 'manha';
+  else if (h < 18) timeKey = 'tarde';
+  else timeKey = 'noite';
 
-  const useNeutral = Math.random() < 0.3;
-  const opener = useNeutral ? pickRandom(GREET_NEUTRAL) : pickRandom(bucket);
-  const voc = pickRandom(GREET_VOCATIVOS);
-  const tail = pickRandom(GREET_TAILS);
-  const raw = opener + ' ' + voc + ', ' + tail;
+  // 45% classic (opener + vocativo, tail), 55% freeform
+  if (Math.random() < 0.45) {
+    const bucket = GREET_BY_TIME[timeKey];
+    const useNeutral = Math.random() < 0.3;
+    const opener = useNeutral ? pickRandom(GREET_NEUTRAL) : pickRandom(bucket);
+    const voc = pickRandom(GREET_VOCATIVOS);
+    const tail = pickRandom(GREET_TAILS);
+    const raw = opener + ' ' + voc + ', ' + tail;
+    return raw.charAt(0).toUpperCase() + raw.slice(1);
+  }
+
+  const pool = GREET_FREEFORM.any.concat(GREET_FREEFORM[timeKey] || []);
+  const raw = pickRandom(pool);
   return raw.charAt(0).toUpperCase() + raw.slice(1);
 }
 
@@ -243,7 +308,8 @@ function calcPeriodo(sim = {}) {
 
   const aprov = distReg > 0 ? (earnedReg / distReg) * 100 : null;
   const totalScore = earnedReg + tpBonus;
-  const starsEligible = !anyAS;
+  const enrolledOk = n >= 4;
+  const starsEligible = !anyAS && enrolledOk;
   const starsProgress = starsNeeded > 0
     ? Math.min(totalScore / starsNeeded, 1) * 100
     : 0;
@@ -252,7 +318,7 @@ function calcPeriodo(sim = {}) {
     n, total, starsNeeded,
     earnedReg, distReg,
     tpBonus, totalScore,
-    aprov, anyAS,
+    aprov, anyAS, enrolledOk,
     starsEligible, starsProgress
   };
 }
@@ -269,7 +335,8 @@ function normalCdf(z) {
 
 function calcStarsProbability(p) {
   if (p.n === 0) return { state: 'empty' };
-  if (!p.starsEligible) return { state: 'out' };
+  if (p.anyAS) return { state: 'out' };
+  if (!p.enrolledOk) return { state: 'insufficient', falta: 4 - p.n };
   if (p.distReg === 0) return { state: 'nodata' };
 
   const remaining = Math.max(0, p.total - p.distReg);
@@ -332,6 +399,14 @@ function renderProbCard(p) {
     reset();
     statusEl.textContent = 'sem disciplinas';
     hintEl.textContent = 'crie disciplinas pra estimar';
+    return;
+  }
+  if (prob.state === 'insufficient') {
+    reset();
+    statusEl.textContent = 'matrícula insuficiente';
+    statusEl.className = 'stars-status out';
+    needEl.textContent = 4 - p.n + ' disc. a mais';
+    hintEl.textContent = 'o Stars exige matrícula em 4+ disciplinas — você tem ' + p.n;
     return;
   }
   if (prob.state === 'nodata') {
@@ -474,8 +549,11 @@ function renderHome() {
   // Hint line
   if (p.n === 0) {
     hintEl.innerHTML = 'crie suas disciplinas pra começar';
-  } else if (!p.starsEligible) {
+  } else if (p.anyAS) {
     hintEl.innerHTML = 'você fez AS — não pode mais pegar o Stars neste período';
+  } else if (!p.enrolledOk) {
+    const falta = 4 - p.n;
+    hintEl.innerHTML = 'precisa estar matriculado em ao menos <strong>4 disciplinas</strong> (falta ' + falta + ')';
   } else if (p.totalScore >= p.starsNeeded) {
     hintEl.innerHTML = 'você garantiu o Stars com ' + Math.round(p.totalScore) + ' pontos';
   } else {
@@ -1082,6 +1160,23 @@ document.querySelectorAll('[data-goto]').forEach(el => {
 });
 
 document.getElementById('btn-add-disc').addEventListener('click', openModalAddDisc);
+
+document.getElementById('btn-reset-periodo').addEventListener('click', () => {
+  if (!confirm('Resetar o período? Isso apaga TODAS as disciplinas, notas, TP e histórico. (1/3)')) return;
+  if (!confirm('Tem certeza? Esta ação é irreversível — nada pode ser recuperado. (2/3)')) return;
+  if (!confirm('Última chance. Confirmar apagar tudo? (3/3)')) return;
+  state = {
+    v: 1,
+    disciplinas: [],
+    tp: { value: null, expectativa: false, applyTo: null },
+    recentes: []
+  };
+  saveState();
+  simState = {};
+  currentDiscId = null;
+  renderDisciplinas();
+  renderHome();
+});
 document.getElementById('btn-edit-tp').addEventListener('click', openModalTP);
 document.getElementById('btn-add-ac').addEventListener('click', openModalAddAc);
 
