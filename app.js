@@ -395,6 +395,7 @@ function renderSegBar() {
 
 function renderProbCard(p) {
   const prob = calcStarsProbability(p);
+  const cardEl = document.getElementById('prob-card');
   const pctEl = document.getElementById('prob-pct');
   const barEl = document.getElementById('prob-bar');
   const statusEl = document.getElementById('prob-status');
@@ -402,6 +403,8 @@ function renderProbCard(p) {
   const needEl = document.getElementById('prob-need');
   const rateEl = document.getElementById('prob-rate');
   const hintEl = document.getElementById('prob-hint');
+
+  cardEl.className = 'prob-card';
 
   const reset = () => {
     pctEl.textContent = '—';
@@ -421,6 +424,7 @@ function renderProbCard(p) {
   }
   if (prob.state === 'insufficient') {
     reset();
+    cardEl.classList.add('danger');
     statusEl.textContent = 'matrícula insuficiente';
     statusEl.className = 'stars-status out';
     needEl.textContent = 4 - p.n + ' disc. a mais';
@@ -436,6 +440,7 @@ function renderProbCard(p) {
   }
   if (prob.state === 'out') {
     reset();
+    cardEl.classList.add('danger');
     pctEl.textContent = '0';
     barEl.style.width = '100%';
     barEl.className = 'bar-fill danger';
@@ -447,6 +452,7 @@ function renderProbCard(p) {
     return;
   }
   if (prob.state === 'locked') {
+    cardEl.classList.add('success');
     pctEl.textContent = '100';
     barEl.style.width = '100%';
     barEl.className = 'bar-fill success';
@@ -459,6 +465,7 @@ function renderProbCard(p) {
     return;
   }
   if (prob.state === 'impossible') {
+    cardEl.classList.add('danger');
     pctEl.textContent = '0';
     barEl.style.width = '100%';
     barEl.className = 'bar-fill danger';
@@ -483,6 +490,7 @@ function renderProbCard(p) {
   else { band = 'danger'; label = 'improvável'; cls = 'out'; }
 
   barEl.className = 'bar-fill ' + band;
+  cardEl.classList.add(band);
   statusEl.textContent = label;
   statusEl.className = 'stars-status' + (cls ? ' ' + cls : '');
 

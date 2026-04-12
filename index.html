@@ -56,14 +56,24 @@
       </div>
 
       <div class="prob-card" id="prob-card">
-        <div class="prob-top">
-          <div>
+        <div class="prob-head">
+          <div class="prob-head-main">
             <div class="metric-label">Chances do Stars</div>
-            <div class="prob-value"><span id="prob-pct">—</span><span class="prob-unit">%</span></div>
+            <span class="stars-status" id="prob-status">—</span>
           </div>
-          <span class="stars-status" id="prob-status">—</span>
+          <div class="prob-head-aside">
+            <div class="prob-big"><span id="prob-pct">—</span><span class="prob-big-sym">%</span></div>
+            <div class="prob-big-label">probabilidade</div>
+          </div>
         </div>
-        <div class="bar"><div class="bar-fill" id="prob-bar"></div></div>
+        <div class="prob-gauge">
+          <div class="bar prob-bar-track"><div class="bar-fill" id="prob-bar"></div></div>
+          <div class="prob-bar-scale">
+            <span>0%</span>
+            <span>50%</span>
+            <span>100%</span>
+          </div>
+        </div>
         <div class="prob-stats">
           <div class="prob-stat">
             <span class="prob-stat-label">projeção final</span>
