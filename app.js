@@ -375,6 +375,24 @@ function calcStarsProbability(p) {
   };
 }
 
+function renderSegBar() {
+  const el = document.getElementById('seg-dist');
+  if (state.disciplinas.length === 0) {
+    el.innerHTML = '<div class="seg-bar-empty">crie disciplinas pra ver o progresso</div>';
+    return;
+  }
+  el.innerHTML = state.disciplinas.map(d => {
+    const r = calcDisc(d);
+    const distW = Math.max(0, Math.min(100, r.dist));
+    const earnedW = Math.max(0, Math.min(100, r.earned));
+    const title = escapeHTML(d.nome) + ' — ' + fmtNum(r.earned, 1) + '/' + fmtNum(r.dist, 0) + ' pts';
+    return '<div class="seg" title="' + title + '">'
+      + '<div class="seg-dist-fill" style="width:' + distW + '%"></div>'
+      + '<div class="seg-earned-fill" style="width:' + earnedW + '%"></div>'
+      + '</div>';
+  }).join('');
+}
+
 function renderProbCard(p) {
   const prob = calcStarsProbability(p);
   const pctEl = document.getElementById('prob-pct');
@@ -567,11 +585,13 @@ function renderHome() {
   document.getElementById('pts-dist').textContent = fmtNum(p.distReg, 1);
   document.getElementById('pts-total').textContent = p.total || 500;
   const distPct = p.total > 0 ? (p.distReg / p.total) * 100 : 0;
-  document.getElementById('bar-dist').style.width = distPct + '%';
+  document.getElementById('dist-pct').innerHTML =
+    fmtNum(distPct, 0) + '<span class="dist-pct-sym">%</span>';
+  renderSegBar();
   document.getElementById('dist-hint').textContent =
     (p.n === 0 || p.distReg === 0)
       ? 'nada lançado ainda'
-      : fmtNum(distPct, 0) + '% do semestre lançado';
+      : fmtNum(p.earnedReg, 0) + ' pts ganhos de ' + fmtNum(p.distReg, 0) + ' já lançados';
 
   // Aproveitamento
   const aprovEl = document.getElementById('aprov-pct');

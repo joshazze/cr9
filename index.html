@@ -81,19 +81,33 @@
         <div class="metric-hint" id="prob-hint">preencha notas pra estimar</div>
       </div>
 
-      <div class="metrics-grid">
-        <div class="metric-card">
-          <div class="metric-label">Pontos distribuídos</div>
-          <div class="metric-value"><span id="pts-dist">0</span><span class="metric-unit"> / <span id="pts-total">500</span></span></div>
-          <div class="bar"><div class="bar-fill accent" id="bar-dist"></div></div>
-          <div class="metric-hint" id="dist-hint">nada lançado ainda</div>
+      <div class="metric-card dist-card">
+        <div class="dist-head">
+          <div>
+            <div class="metric-label">Pontos distribuídos</div>
+            <div class="metric-value"><span id="pts-dist">0</span><span class="metric-unit"> de <span id="pts-total">500</span></span></div>
+          </div>
+          <div class="dist-pct-wrap">
+            <div class="dist-pct" id="dist-pct">0<span class="dist-pct-sym">%</span></div>
+            <div class="dist-pct-label">do período</div>
+          </div>
         </div>
-        <div class="metric-card">
-          <div class="metric-label">Aproveitamento</div>
-          <div class="metric-value" id="aprov-pct">—</div>
-          <div class="bar"><div class="bar-fill" id="bar-aprov"></div></div>
-          <div class="metric-hint" id="aprov-hint">nada para calcular</div>
+        <div class="seg-bar" id="seg-dist">
+          <div class="seg-bar-empty">crie disciplinas pra ver o progresso</div>
         </div>
+        <div class="seg-legend">
+          <span><span class="sl-dot earned"></span> ganhos</span>
+          <span><span class="sl-dot dist"></span> lançados</span>
+          <span><span class="sl-dot empty"></span> a lançar</span>
+        </div>
+        <div class="metric-hint" id="dist-hint">nada lançado ainda</div>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-label">Aproveitamento</div>
+        <div class="metric-value" id="aprov-pct">—</div>
+        <div class="bar"><div class="bar-fill" id="bar-aprov"></div></div>
+        <div class="metric-hint" id="aprov-hint">nada para calcular</div>
       </div>
 
       <div class="tp-card">
