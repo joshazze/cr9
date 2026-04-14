@@ -260,14 +260,33 @@ function calcDisc(d, ov = {}) {
     }
   }
 
+  const acMode = d.acMode || 'custom';
   let acEarned = 0, acDist = 0;
-  d.acs.forEach(ac => {
-    const v = ov.acs && ov.acs[ac.id] !== undefined ? ov.acs[ac.id] : ac.value;
-    if (v !== null && v !== undefined) {
-      acEarned += v;
-      acDist += ac.valor;
-    }
-  });
+  if (acMode === 'equal') {
+    const nAcs = d.acs.length;
+    const share = nAcs > 0 ? 20 / nAcs : 0;
+    d.acs.forEach(ac => {
+      const deliv = ov.acs && ov.acs[ac.id] !== undefined ? ov.acs[ac.id] : ac.delivered;
+      if (deliv === true || deliv === false) {
+        acDist += share;
+        if (deliv === true) acEarned += share;
+      }
+    });
+  } else {
+    d.acs.forEach(ac => {
+      const v = ov.acs && ov.acs[ac.id] !== undefined ? ov.acs[ac.id] : ac.value;
+      if (v !== null && v !== undefined) {
+        acEarned += v;
+        acDist += ac.valor;
+      }
+    });
+  }
+
+  // Sim-only: hypothetical "AC restante" — points for ACs not yet created.
+  if (ov.acExtra !== undefined && ov.acExtra !== null && !isNaN(ov.acExtra)) {
+    acEarned += ov.acExtra;
+    acDist += ov.acExtra;
+  }
 
   const earned = (ap1F !== null && ap1F !== undefined ? ap1F : 0)
                + (ap2F !== null && ap2F !== undefined ? ap2F : 0)
@@ -761,10 +780,44 @@ function renderDetalhe() {
   document.getElementById('row-ap1').innerHTML = gradeDisplay(d.ap1, 40) + gradeActions('ap1');
   document.getElementById('row-ap2').innerHTML = gradeDisplay(d.ap2, 40) + gradeActions('ap2');
 
-  // ACs
+  // ACs — mode toggle
+  const acMode = d.acMode || 'custom';
+  const toggleEl = document.getElementById('ac-mode-toggle');
+  toggleEl.querySelectorAll('.ac-mode-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.mode === acMode);
+    btn.onclick = () => setAcMode(btn.dataset.mode);
+  });
+
+  const acMaxEl = document.getElementById('ac-section-max');
+  if (acMode === 'equal') {
+    const n = d.acs.length;
+    acMaxEl.textContent = n > 0
+      ? 'máx 20 total · ' + fmtNum(20 / n, 1) + ' cada'
+      : 'máx 20 total · split igual';
+  } else {
+    acMaxEl.textContent = 'máx 20 total';
+  }
+
+  // ACs — list
   const listaAcs = document.getElementById('lista-acs');
   if (d.acs.length === 0) {
     listaAcs.innerHTML = '<li class="empty">nenhuma atividade complementar</li>';
+  } else if (acMode === 'equal') {
+    const share = 20 / d.acs.length;
+    listaAcs.innerHTML = d.acs.map(ac => {
+      let cls, label;
+      if (ac.delivered === true) { cls = 'delivered'; label = 'entregue'; }
+      else if (ac.delivered === false) { cls = 'missed'; label = 'não entregue'; }
+      else { cls = 'empty'; label = '—'; }
+      return '<li class="ac-item equal">'
+        + '<div class="ac-body">'
+        + '<div class="ac-nome">' + escapeHTML(ac.nome) + '</div>'
+        + '<div class="ac-val">vale ' + fmtNum(share, 1) + ' pts</div>'
+        + '</div>'
+        + '<div class="ac-grade ' + cls + '" data-ac-edit="' + ac.id + '">' + label + '</div>'
+        + '<button class="ac-del" data-ac-del="' + ac.id + '" aria-label="excluir">×</button>'
+        + '</li>';
+    }).join('');
   } else {
     listaAcs.innerHTML = d.acs.map(ac => {
       const has = ac.value !== null && ac.value !== undefined;
@@ -780,6 +833,9 @@ function renderDetalhe() {
         + '<button class="ac-del" data-ac-del="' + ac.id + '" aria-label="excluir">×</button>'
         + '</li>';
     }).join('');
+  }
+
+  if (d.acs.length > 0) {
     listaAcs.querySelectorAll('[data-ac-edit]').forEach(el => {
       el.addEventListener('click', () => openModalAcGrade(el.dataset.acEdit));
     });
@@ -829,30 +885,57 @@ function renderSimulador() {
 
   body.innerHTML = state.disciplinas.map(d => renderSimDisc(d)).join('');
 
-  body.querySelectorAll('input[data-disc]').forEach(inp => {
+  const ensureSim = (discId) => {
+    if (!simState.disc) simState.disc = {};
+    if (!simState.disc[discId]) simState.disc[discId] = { acs: {} };
+    if (!simState.disc[discId].acs) simState.disc[discId].acs = {};
+    return simState.disc[discId];
+  };
+
+  const refreshDiscScore = (discId) => {
+    const d = state.disciplinas.find(x => x.id === discId);
+    if (!d) return;
+    const simD = simState.disc[discId] || {};
+    const r = calcDisc(d, simD);
+    const scoreEl = document.querySelector('.sim-disc[data-disc="' + discId + '"] .sim-disc-score');
+    if (scoreEl) scoreEl.textContent = fmtNum(r.earned, 1) + '/100';
+  };
+
+  body.querySelectorAll('input[type="number"][data-disc]').forEach(inp => {
     if (inp.readOnly) return;
     inp.addEventListener('input', () => {
       const discId = inp.dataset.disc;
       const key = inp.dataset.key;
-      if (!simState.disc) simState.disc = {};
-      if (!simState.disc[discId]) simState.disc[discId] = { acs: {} };
-      if (!simState.disc[discId].acs) simState.disc[discId].acs = {};
+      const simD = ensureSim(discId);
       const raw = inp.value;
       const val = raw === '' ? undefined : parseFloat(raw);
       if (key.startsWith('ac_')) {
-        const acId = key.slice(3);
-        simState.disc[discId].acs[acId] = isNaN(val) ? undefined : val;
+        simD.acs[key.slice(3)] = isNaN(val) ? undefined : val;
+      } else if (key === 'acExtra') {
+        simD.acExtra = isNaN(val) ? undefined : val;
       } else {
-        simState.disc[discId][key] = isNaN(val) ? undefined : val;
+        simD[key] = isNaN(val) ? undefined : val;
       }
-      // update the score for this disc
-      const d = state.disciplinas.find(x => x.id === discId);
-      if (d) {
-        const simD = simState.disc[discId] || {};
-        const r = calcDisc(d, simD);
-        const scoreEl = document.querySelector('.sim-disc[data-disc="' + discId + '"] .sim-disc-score');
-        if (scoreEl) scoreEl.textContent = fmtNum(r.earned, 1) + '/100';
-      }
+      refreshDiscScore(discId);
+      updateSimResult();
+    });
+  });
+
+  body.querySelectorAll('.sim-toggle[data-disc]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (btn.classList.contains('locked')) return;
+      const discId = btn.dataset.disc;
+      const acId = btn.dataset.ac;
+      const simD = ensureSim(discId);
+      const cur = simD.acs[acId];
+      let next;
+      if (cur === undefined) next = true;
+      else if (cur === true) next = false;
+      else next = undefined;
+      simD.acs[acId] = next;
+      btn.className = 'sim-toggle' + (next === true ? ' on' : next === false ? ' off' : '');
+      btn.textContent = next === true ? 'entregue' : next === false ? 'não entregue' : '—';
+      refreshDiscScore(discId);
       updateSimResult();
     });
   });
@@ -863,6 +946,7 @@ function renderSimulador() {
 function renderSimDisc(d) {
   const simD = (simState.disc && simState.disc[d.id]) || {};
   const r = calcDisc(d, simD);
+  const mode = d.acMode || 'custom';
 
   const field = (key, label, max, realSlot) => {
     const realVal = realSlot && realSlot.value !== null && realSlot.value !== undefined ? realSlot.value : null;
@@ -885,7 +969,56 @@ function renderSimDisc(d) {
       + '</div>';
   };
 
-  const acFields = d.acs.map(ac => field('ac_' + ac.id, escapeHTML(ac.nome), ac.valor, ac)).join('');
+  let acFields = '';
+  let realAcDist = 0;
+  if (mode === 'equal') {
+    const n = d.acs.length;
+    const share = n > 0 ? 20 / n : 0;
+    acFields = d.acs.map(ac => {
+      const real = ac.delivered;
+      const locked = real === true || real === false;
+      const sim = simD.acs && simD.acs[ac.id];
+      let state, label;
+      if (locked) {
+        state = real === true ? 'on' : 'off';
+        label = real === true ? 'entregue' : 'não entregue';
+      } else if (sim === true) { state = 'on'; label = 'entregue'; }
+      else if (sim === false) { state = 'off'; label = 'não entregue'; }
+      else { state = ''; label = '—'; }
+      return '<div class="sim-field sim-field-toggle">'
+        + '<label>' + escapeHTML(ac.nome) + '</label>'
+        + '<button type="button" class="sim-toggle ' + state + (locked ? ' locked' : '') + '"'
+        + ' data-disc="' + d.id + '" data-ac="' + ac.id + '">' + label + '</button>'
+        + '<span class="sim-max">' + fmtNum(share, 1) + ' pts</span>'
+        + '</div>';
+    }).join('');
+  } else {
+    acFields = d.acs.map(ac => field('ac_' + ac.id, escapeHTML(ac.nome), ac.valor, ac)).join('');
+  }
+
+  // AC restante: pts for ACs not yet created.
+  // Custom: 20 - sum(valor de ACs existentes). Equal: 20 só quando não há AC nenhuma
+  // (com >=1 AC no modo igual, os toggles já cobrem todo o pool).
+  let restante;
+  if (mode === 'equal') {
+    restante = d.acs.length === 0 ? 20 : 0;
+  } else {
+    const acValorSum = d.acs.reduce((s, ac) => s + (ac.valor || 0), 0);
+    restante = Math.max(0, 20 - acValorSum);
+  }
+  let restanteSection = '';
+  if (restante > 0.01) {
+    const simExtra = simD.acExtra !== undefined && simD.acExtra !== null && !isNaN(simD.acExtra)
+      ? simD.acExtra : '';
+    restanteSection = '<div class="sim-field sim-field-extra">'
+      + '<label>AC restante</label>'
+      + '<input type="number" step="0.5" min="0" max="' + restante.toFixed(2) + '"'
+      + ' data-disc="' + d.id + '" data-key="acExtra"'
+      + ' value="' + simExtra + '" placeholder="0">'
+      + '<span class="sim-max">/ ' + fmtNum(restante, 1) + '</span>'
+      + '</div>'
+      + '<p class="sim-extra-hint">pontos de AC ainda por criar ou lançar</p>';
+  }
 
   return '<div class="sim-disc" data-disc="' + d.id + '">'
     + '<div class="sim-disc-head">'
@@ -895,6 +1028,7 @@ function renderSimDisc(d) {
     + field('ap1', 'AP1', 40, d.ap1)
     + field('ap2', 'AP2', 40, d.ap2)
     + acFields
+    + restanteSection
     + '</div>';
 }
 
@@ -961,7 +1095,8 @@ function openModalAddDisc() {
         ap1: { value: null, expectativa: false },
         ap2: { value: null, expectativa: false },
         as: { value: null, expectativa: false, taken: false },
-        acs: []
+        acs: [],
+        acMode: 'custom'
       });
       saveState();
       renderDisciplinas();
@@ -1028,11 +1163,83 @@ function openModalGrade(tipo, isExpectativa) {
   });
 }
 
+function setAcMode(mode) {
+  const d = state.disciplinas.find(x => x.id === currentDiscId);
+  if (!d) return;
+  const current = d.acMode || 'custom';
+  if (current === mode) return;
+
+  if (mode === 'equal') {
+    d.acs.forEach(ac => {
+      if (ac.delivered === undefined) ac.delivered = null;
+    });
+  } else {
+    const n = d.acs.length;
+    const share = n > 0 ? 20 / n : 0;
+    d.acs.forEach(ac => {
+      if (!ac.valor || ac.valor <= 0) ac.valor = share;
+    });
+  }
+  d.acMode = mode;
+  saveState();
+  renderDetalhe();
+}
+
 function openModalAcGrade(acId) {
   const d = state.disciplinas.find(x => x.id === currentDiscId);
   if (!d) return;
   const ac = d.acs.find(a => a.id === acId);
   if (!ac) return;
+
+  const mode = d.acMode || 'custom';
+  if (mode === 'equal') {
+    const share = d.acs.length > 0 ? 20 / d.acs.length : 0;
+    const clearBtn = (ac.delivered === true || ac.delivered === false)
+      ? '<button type="button" class="btn sm danger" id="m-clear">limpar status</button>'
+      : '';
+    openModal(
+      'entrega · ' + ac.nome,
+      '<p class="form-hint">essa atividade vale ' + fmtNum(share, 1) + ' pts (split igual entre ' + d.acs.length + ').</p>'
+      + '<div class="radio-group" id="m-deliv">'
+      + '<label class="' + (ac.delivered === true ? 'selected' : '') + '"><input type="radio" name="deliv" value="yes" ' + (ac.delivered === true ? 'checked' : '') + '>entregue</label>'
+      + '<label class="' + (ac.delivered === false ? 'selected' : '') + '"><input type="radio" name="deliv" value="no" ' + (ac.delivered === false ? 'checked' : '') + '>não entregue</label>'
+      + '</div>'
+      + clearBtn,
+      () => {
+        const checked = document.querySelector('input[name="deliv"]:checked');
+        if (!checked) { alert('Escolha entregue ou não entregue'); return false; }
+        ac.delivered = checked.value === 'yes';
+        ac.value = null;
+        ac.expectativa = false;
+        pushRecente({
+          discId: d.id,
+          discNome: d.nome,
+          tipo: 'ac',
+          label: 'AC · ' + ac.nome,
+          valor: ac.delivered ? share : 0,
+          max: share,
+          kind: 'oficial'
+        });
+        saveState();
+        renderDetalhe();
+        return true;
+      }
+    );
+    document.querySelectorAll('#m-deliv label').forEach(lbl => {
+      lbl.addEventListener('click', () => {
+        document.querySelectorAll('#m-deliv label').forEach(l => l.classList.remove('selected'));
+        lbl.classList.add('selected');
+      });
+    });
+    const clearElEq = document.getElementById('m-clear');
+    if (clearElEq) clearElEq.addEventListener('click', () => {
+      ac.delivered = null;
+      saveState();
+      document.getElementById('modal').hidden = true;
+      renderDetalhe();
+    });
+    return;
+  }
 
   const clearBtn = (ac.value !== null && ac.value !== undefined)
     ? '<button type="button" class="btn sm danger" id="m-clear">limpar nota</button>'
@@ -1093,6 +1300,29 @@ function openModalAcGrade(acId) {
 function openModalAddAc() {
   const d = state.disciplinas.find(x => x.id === currentDiscId);
   if (!d) return;
+  const mode = d.acMode || 'custom';
+
+  if (mode === 'equal') {
+    const nAfter = d.acs.length + 1;
+    const shareAfter = 20 / nAfter;
+    openModal(
+      'nova atividade (AC)',
+      '<label>nome'
+      + '<input type="text" id="m-nome" placeholder="ex: lista 1" autofocus>'
+      + '</label>'
+      + '<p class="form-hint">split igual: depois de adicionar, cada uma vale ' + fmtNum(shareAfter, 1) + ' pts (' + nAfter + ' atividades).</p>',
+      () => {
+        const nome = document.getElementById('m-nome').value.trim();
+        if (!nome) { alert('Nome obrigatório'); return false; }
+        d.acs.push({ id: uid(), nome, valor: 0, value: null, expectativa: false, delivered: null });
+        saveState();
+        renderDetalhe();
+        return true;
+      }
+    );
+    return;
+  }
+
   const usado = d.acs.reduce((s, a) => s + a.valor, 0);
   const restante = Math.max(0, 20 - usado);
 
@@ -1110,7 +1340,7 @@ function openModalAddAc() {
       const valor = parseFloat(document.getElementById('m-valor').value);
       if (!nome) { alert('Nome obrigatório'); return false; }
       if (isNaN(valor) || valor <= 0) { alert('Valor inválido'); return false; }
-      d.acs.push({ id: uid(), nome, valor, value: null, expectativa: false });
+      d.acs.push({ id: uid(), nome, valor, value: null, expectativa: false, delivered: null });
       saveState();
       renderDetalhe();
       return true;
@@ -1231,9 +1461,21 @@ document.getElementById('btn-fill-max-sim').addEventListener('click', () => {
     const o = { acs: {} };
     if (d.ap1.value === null || d.ap1.value === undefined) o.ap1 = 40;
     if (d.ap2.value === null || d.ap2.value === undefined) o.ap2 = 40;
-    d.acs.forEach(ac => {
-      if (ac.value === null || ac.value === undefined) o.acs[ac.id] = ac.valor;
-    });
+    const mode = d.acMode || 'custom';
+    let restante;
+    if (mode === 'equal') {
+      d.acs.forEach(ac => {
+        if (ac.delivered !== true && ac.delivered !== false) o.acs[ac.id] = true;
+      });
+      restante = d.acs.length === 0 ? 20 : 0;
+    } else {
+      d.acs.forEach(ac => {
+        if (ac.value === null || ac.value === undefined) o.acs[ac.id] = ac.valor;
+      });
+      const acValorSum = d.acs.reduce((s, ac) => s + (ac.valor || 0), 0);
+      restante = Math.max(0, 20 - acValorSum);
+    }
+    if (restante > 0.01) o.acExtra = restante;
     simState.disc[d.id] = o;
   });
   renderSimulador();

@@ -192,7 +192,11 @@
       </div>
 
       <div class="section">
-        <div class="section-title">Atividades Complementares <span class="section-max">máx 20 total</span></div>
+        <div class="section-title">Atividades Complementares <span class="section-max" id="ac-section-max">máx 20 total</span></div>
+        <div class="ac-mode-toggle" id="ac-mode-toggle">
+          <button type="button" class="ac-mode-btn active" data-mode="custom">valores custom</button>
+          <button type="button" class="ac-mode-btn" data-mode="equal">split igual</button>
+        </div>
         <ul id="lista-acs" class="list tight"></ul>
         <button class="btn secondary sm" id="btn-add-ac" style="margin-top:10px">+ atividade</button>
       </div>

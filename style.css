@@ -1308,6 +1308,104 @@ header::before {
 }
 .ac-item .ac-del:hover { color: var(--danger); background: var(--danger-soft); }
 
+/* ── AC mode toggle (custom vs equal) ── */
+.ac-mode-toggle {
+  display: inline-flex;
+  padding: 4px;
+  margin: 0 0 12px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  gap: 2px;
+}
+.ac-mode-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: calc(var(--radius-sm) - 2px);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  letter-spacing: 0.01em;
+}
+.ac-mode-btn:hover { color: var(--text); }
+.ac-mode-btn.active {
+  background: var(--card);
+  color: var(--accent);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+
+/* ── AC equal-mode items ── */
+.ac-item.equal .ac-grade {
+  min-width: 110px;
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+}
+.ac-item .ac-grade.delivered {
+  color: var(--success);
+  background: var(--success-soft);
+  border-color: color-mix(in srgb, var(--success) 25%, var(--border));
+}
+.ac-item .ac-grade.missed {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-color: color-mix(in srgb, var(--danger) 25%, var(--border));
+}
+
+/* ── Simulador equal-mode toggle + restante ── */
+.sim-field-toggle { gap: 12px; }
+.sim-toggle {
+  min-width: 108px;
+  padding: 9px 14px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.sim-toggle:hover { border-color: var(--border-strong); }
+.sim-toggle.on {
+  color: var(--success);
+  background: var(--success-soft);
+  border-color: color-mix(in srgb, var(--success) 30%, var(--border));
+}
+.sim-toggle.off {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-color: color-mix(in srgb, var(--danger) 30%, var(--border));
+}
+.sim-toggle.locked {
+  cursor: default;
+  opacity: 0.75;
+  font-style: italic;
+}
+.sim-field-extra {
+  margin-top: 2px;
+  padding-top: 12px;
+  border-top: 1px dashed color-mix(in srgb, var(--accent) 25%, var(--border));
+}
+.sim-field-extra label { color: var(--accent); font-weight: 600; }
+.sim-extra-hint {
+  margin: 0 0 4px;
+  padding: 0 0 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-style: italic;
+}
+
 /* ── Simulator ── */
 .sim-disc {
   background:
