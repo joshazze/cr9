@@ -1496,7 +1496,7 @@ if ('serviceWorker' in navigator) {
     window.location.reload();
   });
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').then((reg) => {
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((reg) => {
       // Check for updates on every load + every 30min while app stays open.
       reg.update().catch(() => {});
       setInterval(() => reg.update().catch(() => {}), 30 * 60 * 1000);
