@@ -595,7 +595,6 @@ header::before {
   margin-bottom: 16px;
   overflow: hidden;
   box-shadow: var(--shadow-sm);
-  animation: fadeUp 0.3s ease both;
 }
 .cfg-card::before {
   content: '';
@@ -666,7 +665,11 @@ header::before {
   cursor: pointer;
   transition: background 0.2s, color 0.2s, box-shadow 0.2s, transform 0.15s;
   -webkit-tap-highlight-color: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+  touch-action: manipulation;
 }
+.cfg-seg > * { pointer-events: none; }
 .cfg-seg:active { transform: scale(0.97); }
 .cfg-seg.active {
   background: var(--card);
@@ -700,7 +703,11 @@ header::before {
   transition: background 0.15s, border-color 0.15s, transform 0.15s, box-shadow 0.2s;
   font-family: var(--sans);
   -webkit-tap-highlight-color: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+  touch-action: manipulation;
 }
+.cfg-opt > * { pointer-events: none; }
 .cfg-opt:active { transform: scale(0.985); }
 .cfg-opt-title {
   font-size: 15px;
@@ -783,7 +790,12 @@ header::before {
   font-family: var(--sans);
   text-align: left;
   -webkit-tap-highlight-color: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+  touch-action: manipulation;
 }
+.cfg-action > *,
+.cfg-action > * > * { pointer-events: none; }
 .cfg-action:hover { border-color: var(--accent); background: var(--card); }
 .cfg-action:active { transform: scale(0.985); }
 .cfg-action:focus-visible {

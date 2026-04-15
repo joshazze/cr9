@@ -14,15 +14,15 @@ function fmtNum(n, dec = 1) {
   return Number(n).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: dec });
 }
 
-// Precisão adaptativa pra probabilidade: mostra 2 dígitos significativos
-// pós-vírgula mesmo quando o valor é muito pequeno (ex: 0,0034%).
+// Precisão adaptativa pra probabilidade: mostra 3 dígitos significativos
+// mesmo quando o valor é muito pequeno (ex: 0,000347%).
 function fmtPct(p) {
   if (p === null || p === undefined || isNaN(p)) return '—';
   if (p <= 0) return '0';
   if (p >= 10) return fmtNum(p, 1);
   if (p >= 1) return fmtNum(p, 2);
   const exp = Math.floor(Math.log10(p));
-  const dec = Math.min(8, Math.max(2, 1 - exp));
+  const dec = Math.min(12, Math.max(3, 2 - exp));
   return fmtNum(p, dec);
 }
 
@@ -1862,23 +1862,27 @@ document.getElementById('hdr-meta').textContent =
   new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' });
 
 // ───────── CONFIG BINDINGS ─────────
+// Event delegation on #s-config: more robust than per-button bindings
+// (sobrevive a re-render, iOS quirks, e cliques em children).
 
-document.querySelectorAll('#pref-gender .cfg-seg').forEach(btn => {
-  btn.addEventListener('click', () => {
-    state.gender = btn.dataset.value;
+document.getElementById('s-config').addEventListener('click', (e) => {
+  const seg = e.target.closest('#pref-gender .cfg-seg');
+  if (seg) {
+    state.gender = seg.dataset.value;
     saveState();
     document.getElementById('hdr-tagline').textContent = getSaudacao(state.gender);
     renderConfig();
-  });
-});
-document.querySelectorAll('#pref-foco .cfg-opt').forEach(btn => {
-  btn.addEventListener('click', () => {
-    state.foco = btn.dataset.value;
+    return;
+  }
+  const opt = e.target.closest('#pref-foco .cfg-opt');
+  if (opt) {
+    state.foco = opt.dataset.value;
     simState = {};
     saveState();
     renderConfig();
     renderHome();
-  });
+    return;
+  }
 });
 
 // Export / Import
