@@ -14,6 +14,18 @@ function fmtNum(n, dec = 1) {
   return Number(n).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: dec });
 }
 
+// Precisão adaptativa pra probabilidade: mostra 2 dígitos significativos
+// pós-vírgula mesmo quando o valor é muito pequeno (ex: 0,0034%).
+function fmtPct(p) {
+  if (p === null || p === undefined || isNaN(p)) return '—';
+  if (p <= 0) return '0';
+  if (p >= 10) return fmtNum(p, 1);
+  if (p >= 1) return fmtNum(p, 2);
+  const exp = Math.floor(Math.log10(p));
+  const dec = Math.min(8, Math.max(2, 1 - exp));
+  return fmtNum(p, dec);
+}
+
 function escapeHTML(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -542,7 +554,7 @@ function renderProbCard(p) {
   }
 
   // computed
-  pctEl.textContent = fmtNum(prob.pct, 1);
+  pctEl.textContent = fmtPct(prob.pct);
   barEl.style.width = Math.max(2, Math.min(100, prob.pct)) + '%';
 
   let band, label, cls;
@@ -997,16 +1009,23 @@ function renderHomeRegistro() {
 // ───────── RENDER: CONFIG ─────────
 
 function renderConfig() {
-  document.querySelectorAll('#pref-gender input[name="gender"]').forEach(inp => {
-    inp.checked = (state.gender === inp.value);
-    const lbl = inp.closest('label');
-    if (lbl) lbl.classList.toggle('selected', inp.checked);
+  document.querySelectorAll('#pref-gender .cfg-seg').forEach(btn => {
+    const on = state.gender === btn.dataset.value;
+    btn.classList.toggle('active', on);
+    btn.setAttribute('aria-checked', on ? 'true' : 'false');
   });
-  document.querySelectorAll('#pref-foco input[name="foco"]').forEach(inp => {
-    inp.checked = (state.foco === inp.value);
-    const lbl = inp.closest('label');
-    if (lbl) lbl.classList.toggle('selected', inp.checked);
+  document.querySelectorAll('#pref-foco .cfg-opt').forEach(btn => {
+    const on = state.foco === btn.dataset.value;
+    btn.classList.toggle('active', on);
+    btn.setAttribute('aria-checked', on ? 'true' : 'false');
   });
+
+  // Sobre stats
+  const p = calcPeriodo();
+  const discEl = document.getElementById('cfg-stat-disc');
+  const ptsEl = document.getElementById('cfg-stat-pts');
+  if (discEl) discEl.textContent = String(p.n);
+  if (ptsEl) ptsEl.textContent = p.n === 0 ? '0' : String(Math.round(p.totalScore));
 }
 
 // ───────── RENDER: DISCIPLINAS ─────────
@@ -1195,12 +1214,13 @@ function renderDetalhe() {
     });
   }
 
-  // AS visibility
+  // AS visibility — user toggle (showAS) é a fonte de verdade pra "pré-completude".
+  // asAutoTriggered já liga showAS uma vez quando todas as notas caem abaixo de 70.
+  // Se AS foi lançada (oficial ou previsão), mostra sempre.
   const rowAS = document.getElementById('row-as');
   const asInfo = document.getElementById('as-info');
-  const belowCutoff = r.earned < 70;
   const forceShow = d.showAS === true;
-  if (forceShow || belowCutoff || d.as.taken || d.as.value !== null) {
+  if (forceShow || d.as.taken || d.as.value !== null) {
     rowAS.hidden = false;
     asInfo.style.display = 'none';
     rowAS.innerHTML = gradeDisplay(d.as, 40) + gradeActions('as');
@@ -1786,6 +1806,7 @@ document.getElementById('btn-reset-periodo').addEventListener('click', () => {
   currentDiscId = null;
   renderDisciplinas();
   renderHome();
+  renderConfig();
 });
 document.getElementById('btn-edit-tp').addEventListener('click', openModalTP);
 document.getElementById('btn-add-ac').addEventListener('click', openModalAddAc);
@@ -1842,19 +1863,17 @@ document.getElementById('hdr-meta').textContent =
 
 // ───────── CONFIG BINDINGS ─────────
 
-document.querySelectorAll('#pref-gender input[name="gender"]').forEach(inp => {
-  inp.addEventListener('change', () => {
-    if (!inp.checked) return;
-    state.gender = inp.value;
+document.querySelectorAll('#pref-gender .cfg-seg').forEach(btn => {
+  btn.addEventListener('click', () => {
+    state.gender = btn.dataset.value;
     saveState();
     document.getElementById('hdr-tagline').textContent = getSaudacao(state.gender);
     renderConfig();
   });
 });
-document.querySelectorAll('#pref-foco input[name="foco"]').forEach(inp => {
-  inp.addEventListener('change', () => {
-    if (!inp.checked) return;
-    state.foco = inp.value;
+document.querySelectorAll('#pref-foco .cfg-opt').forEach(btn => {
+  btn.addEventListener('click', () => {
+    state.foco = btn.dataset.value;
     simState = {};
     saveState();
     renderConfig();

@@ -272,46 +272,111 @@
 
     <!-- CONFIG -->
     <div id="s-config" class="screen">
-      <h3 class="stitle">Configurações</h3>
-
-      <div class="config-section">
-        <div class="config-section-title">Preferências</div>
-        <div class="config-subtitle">Gênero</div>
-        <div class="radio-group" id="pref-gender">
-          <label><input type="radio" name="gender" value="m"><span>Masculino</span></label>
-          <label><input type="radio" name="gender" value="f"><span>Feminino</span></label>
-        </div>
-        <div class="config-subtitle">Foco</div>
-        <div class="radio-group" id="pref-foco">
-          <label><input type="radio" name="foco" value="stars"><span>Stars</span></label>
-          <label><input type="radio" name="foco" value="tracking"><span>Tracking</span></label>
-          <label><input type="radio" name="foco" value="registro"><span>Registro</span></label>
-        </div>
-        <p class="config-hint">Stars mostra a tela completa de probabilidade. Tracking foca em gráficos de progresso. Registro é minimalista, só pra lançar notas rápido.</p>
+      <div class="cfg-hero">
+        <h2 class="cfg-hero-title">Configurações</h2>
+        <p class="cfg-hero-sub">ajuste o app do seu jeito</p>
       </div>
 
-      <div class="config-section">
-        <div class="config-section-title">Sobre</div>
-        <p class="config-text">CR9 · PWA pessoal pra tracking do Ibmec Stars (CR 9,0 = 450 pts de 500, em 4+ disciplinas).</p>
-        <p class="config-text muted" id="config-version">v1</p>
-      </div>
-
-      <div class="config-section">
-        <div class="config-section-title">Dados</div>
-        <p class="config-text">exporta ou importa o estado (disciplinas, notas, TP, histórico) como JSON.</p>
-        <div class="btn-row">
-          <button class="btn secondary sm" id="btn-export">exportar</button>
-          <button class="btn secondary sm" id="btn-import">importar</button>
+      <section class="cfg-card">
+        <div class="cfg-card-head">
+          <span class="cfg-card-kicker">Preferências</span>
+          <h3 class="cfg-card-title">como você quer ser chamado</h3>
         </div>
-      </div>
+        <div class="cfg-card-body">
+          <div class="cfg-subtitle">Gênero</div>
+          <div class="cfg-segmented" id="pref-gender" role="radiogroup" aria-label="Gênero">
+            <button type="button" class="cfg-seg" data-value="m" role="radio" aria-checked="false">
+              <span class="cfg-seg-title">masculino</span>
+            </button>
+            <button type="button" class="cfg-seg" data-value="f" role="radio" aria-checked="false">
+              <span class="cfg-seg-title">feminino</span>
+            </button>
+          </div>
 
-      <div class="danger-zone">
-        <div class="danger-zone-head">
-          <span class="danger-zone-label">Zona de risco</span>
+          <div class="cfg-subtitle">Foco da home</div>
+          <div class="cfg-stack" id="pref-foco" role="radiogroup" aria-label="Foco">
+            <button type="button" class="cfg-opt" data-value="stars" role="radio" aria-checked="false">
+              <span class="cfg-opt-title">Stars</span>
+              <span class="cfg-opt-desc">probabilidade completa, hero ring e breakdown</span>
+            </button>
+            <button type="button" class="cfg-opt" data-value="tracking" role="radio" aria-checked="false">
+              <span class="cfg-opt-title">Tracking</span>
+              <span class="cfg-opt-desc">gráficos de progresso e timeline</span>
+            </button>
+            <button type="button" class="cfg-opt" data-value="registro" role="radio" aria-checked="false">
+              <span class="cfg-opt-title">Registro</span>
+              <span class="cfg-opt-desc">minimal — só lançar notas rápido</span>
+            </button>
+          </div>
         </div>
-        <p class="danger-zone-hint">apaga disciplinas, notas, TP e histórico deste período. exige 3 confirmações.</p>
-        <button class="btn danger sm" id="btn-reset-periodo">resetar período</button>
-      </div>
+      </section>
+
+      <section class="cfg-card">
+        <div class="cfg-card-head">
+          <span class="cfg-card-kicker">Sobre</span>
+          <h3 class="cfg-card-title">CR9 · Ibmec Stars</h3>
+        </div>
+        <div class="cfg-card-body">
+          <p class="cfg-text">controle pessoal pro Ibmec Stars — 450 de 500 pontos em pelo menos 4 disciplinas.</p>
+          <div class="cfg-stats" id="cfg-stats">
+            <div class="cfg-stat">
+              <span class="cfg-stat-num" id="cfg-stat-disc">—</span>
+              <span class="cfg-stat-lbl">disciplinas</span>
+            </div>
+            <div class="cfg-stat">
+              <span class="cfg-stat-num" id="cfg-stat-pts">—</span>
+              <span class="cfg-stat-lbl">pts ganhos</span>
+            </div>
+            <div class="cfg-stat">
+              <span class="cfg-stat-num" id="cfg-stat-ver">v6</span>
+              <span class="cfg-stat-lbl">versão</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="cfg-card">
+        <div class="cfg-card-head">
+          <span class="cfg-card-kicker">Dados</span>
+          <h3 class="cfg-card-title">backup e restauração</h3>
+        </div>
+        <div class="cfg-card-body">
+          <p class="cfg-text">exporte tudo (disciplinas, notas, TP, histórico) como JSON. importe pra migrar entre dispositivos.</p>
+          <div class="cfg-actions">
+            <button class="cfg-action" id="btn-export" type="button">
+              <span class="cfg-action-ico">↓</span>
+              <span class="cfg-action-txt">
+                <span class="cfg-action-title">exportar</span>
+                <span class="cfg-action-sub">baixa um arquivo .json</span>
+              </span>
+            </button>
+            <button class="cfg-action" id="btn-import" type="button">
+              <span class="cfg-action-ico">↑</span>
+              <span class="cfg-action-txt">
+                <span class="cfg-action-title">importar</span>
+                <span class="cfg-action-sub">substitui estado atual</span>
+              </span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section class="cfg-card danger">
+        <div class="cfg-card-head">
+          <span class="cfg-card-kicker danger">Zona de risco</span>
+          <h3 class="cfg-card-title">resetar período</h3>
+        </div>
+        <div class="cfg-card-body">
+          <p class="cfg-text">apaga disciplinas, notas, TP e histórico deste período. mantém gênero e foco. exige 3 confirmações.</p>
+          <button class="cfg-action danger" id="btn-reset-periodo" type="button">
+            <span class="cfg-action-ico">⚠</span>
+            <span class="cfg-action-txt">
+              <span class="cfg-action-title">resetar período</span>
+              <span class="cfg-action-sub">ação irreversível</span>
+            </span>
+          </button>
+        </div>
+      </section>
     </div>
   </div>
 
