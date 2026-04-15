@@ -234,8 +234,12 @@ function migrateState(s) {
   if (s.foco === undefined) s.foco = null;
   s.disciplinas.forEach(d => {
     if (d.showAS === undefined) d.showAS = false;
+    if (d.asAutoTriggered === undefined) d.asAutoTriggered = false;
     if (!d.acs) d.acs = [];
   });
+  const discIds = new Set(s.disciplinas.map(d => d.id));
+  if (s.tp.applyTo && !discIds.has(s.tp.applyTo)) s.tp.applyTo = null;
+  s.recentes = s.recentes.filter(r => r && (r.discId == null || discIds.has(r.discId)));
   s.v = 2;
   return s;
 }
@@ -766,7 +770,7 @@ function renderHomeStars() {
       return '<div class="bd-row">'
         + '<div class="bd-head">'
         + '<span class="bd-name">' + escapeHTML(d.nome) + tpBadge + '</span>'
-        + '<span class="bd-val">' + fmtNum(r.earned + tpB, 1) + '/100</span>'
+        + '<span class="bd-val">' + fmtNum(r.earned, 1) + '/100</span>'
         + '</div>'
         + '<div class="bd-bar">'
         + '<div class="bd-dist" style="width:' + distW + '%"></div>'
@@ -1016,19 +1020,17 @@ function renderDisciplinas() {
   lista.innerHTML = state.disciplinas.map(d => {
     const r = calcDisc(d);
     const tpB = tpBonusForDisc(d.id);
-    const earnedT = r.earned + tpB;
-    const distT = r.dist + tpB;
     const status = discStatus(d);
-    const pct = distT > 0 ? (earnedT / distT * 100) : 0;
-    const metaDist = fmtNum(distT, 0);
-    const metaEarned = fmtNum(earnedT, 1);
+    const pct = r.dist > 0 ? (r.earned / r.dist * 100) : 0;
+    const metaDist = fmtNum(r.dist, 0);
+    const metaEarned = fmtNum(r.earned, 1);
     const tpBadge = tpB > 0 ? ' <span class="tp-badge">+' + tpB + ' TP</span>' : '';
     return '<li class="disc-item ' + status + '" data-id="' + d.id + '">'
       + '<div class="disc-info">'
       + '<div class="disc-nome">' + escapeHTML(d.nome) + tpBadge + '</div>'
       + '<div class="disc-meta">' + metaEarned + '/' + metaDist + ' lançados · ' + fmtNum(pct, 0) + '%</div>'
       + '</div>'
-      + '<div class="disc-pts">' + fmtNum(earnedT, 0) + '<span class="disc-pts-max"> / 100</span></div>'
+      + '<div class="disc-pts">' + fmtNum(r.earned, 0) + '<span class="disc-pts-max"> / 100</span></div>'
       + '<div class="disc-chevron">›</div>'
       + '</li>';
   }).join('');
@@ -1073,25 +1075,38 @@ function renderDetalhe() {
     escapeHTML(d.nome) + (tpB > 0 ? ' <span class="tp-badge">+' + tpB + ' TP</span>' : '');
 
   const r = calcDisc(d);
-  const earnedT = r.earned + tpB;
-  const distT = r.dist + tpB;
-  document.getElementById('det-earned').textContent = fmtNum(earnedT, 1);
-  document.getElementById('det-dist').textContent = fmtNum(distT, 0);
-  const pct = distT > 0 ? (earnedT / distT * 100) : 0;
+  document.getElementById('det-earned').textContent = fmtNum(r.earned, 1);
+  document.getElementById('det-dist').textContent = fmtNum(r.dist, 0);
+  const pct = r.dist > 0 ? (r.earned / r.dist * 100) : 0;
   const detBar = document.getElementById('det-bar');
-  detBar.style.width = Math.max(0, Math.min(100, earnedT)) + '%';
-  if (distT === 0) detBar.className = 'bar-fill';
+  detBar.style.width = Math.max(0, Math.min(100, r.earned + tpB)) + '%';
+  if (r.dist === 0) detBar.className = 'bar-fill';
   else if (pct >= 70) detBar.className = 'bar-fill success';
   else if (pct >= 60) detBar.className = 'bar-fill warning';
   else detBar.className = 'bar-fill danger';
 
   document.getElementById('det-status').textContent =
-    distT === 0 ? 'sem notas'
+    r.dist === 0 ? 'sem notas'
     : pct >= 70 ? 'aproveitamento ' + fmtNum(pct, 1) + '% · dentro da média'
     : pct >= 60 ? 'aproveitamento ' + fmtNum(pct, 1) + '% · abaixo da média'
     : 'aproveitamento ' + fmtNum(pct, 1) + '% · muito abaixo';
 
-  // AS toggle wiring (use .onchange to avoid stacking)
+  const acsAssigned = (d.acs || []).every(ac => {
+    if ((d.acMode || 'custom') === 'equal') return ac.delivered === true || ac.delivered === false;
+    return ac.value !== null && ac.value !== undefined;
+  });
+  const allGradesAssigned = d.ap1.value !== null && d.ap1.value !== undefined
+    && d.ap2.value !== null && d.ap2.value !== undefined
+    && acsAssigned;
+  if (allGradesAssigned && !d.asAutoTriggered) {
+    d.showAS = true;
+    d.asAutoTriggered = true;
+    saveState();
+  } else if (!allGradesAssigned && d.asAutoTriggered) {
+    d.asAutoTriggered = false;
+    saveState();
+  }
+
   const chk = document.getElementById('chk-show-as');
   if (chk) {
     chk.checked = d.showAS === true;
@@ -1181,14 +1196,7 @@ function renderDetalhe() {
   const asInfo = document.getElementById('as-info');
   const belowCutoff = r.earned < 70;
   const forceShow = d.showAS === true;
-  const acsAssigned = (d.acs || []).every(ac => {
-    if ((d.acMode || 'custom') === 'equal') return ac.delivered === true || ac.delivered === false;
-    return ac.value !== null && ac.value !== undefined;
-  });
-  const allGradesAssigned = d.ap1.value !== null && d.ap1.value !== undefined
-    && d.ap2.value !== null && d.ap2.value !== undefined
-    && acsAssigned;
-  if (forceShow || allGradesAssigned || belowCutoff || d.as.taken || d.as.value !== null) {
+  if (forceShow || belowCutoff || d.as.taken || d.as.value !== null) {
     rowAS.hidden = false;
     asInfo.style.display = 'none';
     rowAS.innerHTML = gradeDisplay(d.as, 40) + gradeActions('as');
@@ -1780,6 +1788,8 @@ document.getElementById('btn-del-disc').addEventListener('click', () => {
   if (confirm('Excluir "' + d.nome + '" e todas as suas notas?')) {
     state.disciplinas = state.disciplinas.filter(x => x.id !== currentDiscId);
     if (state.tp.applyTo === currentDiscId) state.tp.applyTo = null;
+    state.recentes = state.recentes.filter(r => r.discId !== currentDiscId);
+    if (simState.disc) delete simState.disc[currentDiscId];
     currentDiscId = null;
     saveState();
     goto('s-disciplinas');
@@ -1837,6 +1847,7 @@ document.querySelectorAll('#pref-foco input[name="foco"]').forEach(inp => {
   inp.addEventListener('change', () => {
     if (!inp.checked) return;
     state.foco = inp.value;
+    simState = {};
     saveState();
     renderConfig();
     renderHome();
