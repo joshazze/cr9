@@ -22,7 +22,6 @@
     <header>
       <div class="hdr-row">
         <h1 class="hdr-title">CR9</h1>
-        <span class="hdr-sub">Ibmec</span>
       </div>
       <p class="hdr-tagline" id="hdr-tagline">seu controle do Ibmec Stars.</p>
       <p class="hdr-meta" id="hdr-meta"></p>
@@ -32,10 +31,19 @@
       <button class="tab active" data-goto="s-home">Home</button>
       <button class="tab" data-goto="s-disciplinas">Disciplinas</button>
       <button class="tab" data-goto="s-simulador">Simulador</button>
+      <button class="tab" data-goto="s-config">Config</button>
     </nav>
 
     <!-- HOME -->
     <div id="s-home" class="screen active">
+      <div id="home-setup-gate" class="home-view" hidden>
+        <div class="setup-gate-msg">
+          <p>setup inicial necessário na página configurações</p>
+          <button class="btn primary sm" data-goto="s-config">ir pra configurações</button>
+        </div>
+      </div>
+
+      <div id="home-stars" class="home-view">
       <div class="stars-hero" id="stars-hero">
         <div class="stars-ring" id="stars-ring">
           <svg viewBox="0 0 120 120">
@@ -49,7 +57,6 @@
         </div>
         <div class="stars-info">
           <h2>Ibmec Stars</h2>
-          <p class="stars-sub">CR 9,0 = 450 pts de 500. Exige matrícula em 4+ disciplinas.</p>
           <span class="stars-status" id="stars-status">Em progresso</span>
           <p class="stars-hint" id="stars-hint">crie suas disciplinas pra começar</p>
         </div>
@@ -145,6 +152,41 @@
       <ul id="lista-recentes" class="list">
         <li class="empty">nenhum lançamento ainda</li>
       </ul>
+      </div><!-- /#home-stars -->
+
+      <div id="home-tracking" class="home-view" hidden>
+        <div class="track-kpi-strip" id="track-kpis"></div>
+        <div class="track-chart-card">
+          <div class="track-chart-title">Expectativa vs Oficial</div>
+          <div id="track-exp-vs-of"></div>
+        </div>
+        <div class="track-chart-card">
+          <div class="track-chart-title">Timeline de pontos</div>
+          <div id="track-timeline"></div>
+        </div>
+        <div class="track-chart-card">
+          <div class="track-chart-title">Aproveitamento por disciplina</div>
+          <div id="track-aprov-list"></div>
+        </div>
+        <div class="track-chart-card">
+          <div class="track-chart-title">Progressão</div>
+          <div id="track-progress"></div>
+        </div>
+        <div class="track-chart-card track-tp-card">
+          <div class="track-chart-title">Contribuição TP</div>
+          <div id="track-tp"></div>
+        </div>
+      </div><!-- /#home-tracking -->
+
+      <div id="home-registro" class="home-view" hidden>
+        <div class="reg-chips" id="reg-chips"></div>
+        <button class="btn primary reg-tp-btn" id="btn-edit-tp-reg">Lançar TP</button>
+        <h3 class="stitle">Lançamentos recentes</h3>
+        <ul id="reg-recentes" class="list">
+          <li class="empty">nenhum lançamento ainda</li>
+        </ul>
+        <div class="reg-progress" id="reg-progress"></div>
+      </div><!-- /#home-registro -->
     </div>
 
     <!-- DISCIPLINAS -->
@@ -156,14 +198,6 @@
       <ul id="lista-disciplinas" class="list">
         <li class="empty">nenhuma disciplina. toca em <strong>+ nova</strong>.</li>
       </ul>
-
-      <div class="danger-zone">
-        <div class="danger-zone-head">
-          <span class="danger-zone-label">Zona de risco</span>
-        </div>
-        <p class="danger-zone-hint">apaga disciplinas, notas, TP e histórico deste período. exige 3 confirmações.</p>
-        <button class="btn danger sm" id="btn-reset-periodo">resetar período</button>
-      </div>
     </div>
 
     <!-- DETALHE -->
@@ -173,6 +207,17 @@
         <h3 class="stitle" id="det-nome">—</h3>
         <button class="btn danger sm" id="btn-del-disc">excluir</button>
       </div>
+
+      <label class="toggle-row" id="det-as-toggle">
+        <span class="toggle-label">
+          Mostrar AS
+          <span class="toggle-hint">habilita a seção de AS mesmo sem estar abaixo de 70</span>
+        </span>
+        <span class="switch">
+          <input type="checkbox" id="chk-show-as">
+          <span class="switch-track"></span>
+        </span>
+      </label>
 
       <div class="metric-card">
         <div class="metric-label">Pontos desta disciplina</div>
@@ -222,6 +267,50 @@
       <div class="btn-row">
         <button class="btn secondary sm" id="btn-reset-sim">resetar</button>
         <button class="btn sm" id="btn-fill-max-sim">preencher máximos</button>
+      </div>
+    </div>
+
+    <!-- CONFIG -->
+    <div id="s-config" class="screen">
+      <h3 class="stitle">Configurações</h3>
+
+      <div class="config-section">
+        <div class="config-section-title">Preferências</div>
+        <div class="config-subtitle">Gênero</div>
+        <div class="radio-group" id="pref-gender">
+          <label><input type="radio" name="gender" value="m"><span>Masculino</span></label>
+          <label><input type="radio" name="gender" value="f"><span>Feminino</span></label>
+        </div>
+        <div class="config-subtitle">Foco</div>
+        <div class="radio-group" id="pref-foco">
+          <label><input type="radio" name="foco" value="stars"><span>Stars</span></label>
+          <label><input type="radio" name="foco" value="tracking"><span>Tracking</span></label>
+          <label><input type="radio" name="foco" value="registro"><span>Registro</span></label>
+        </div>
+        <p class="config-hint">Stars mostra a tela completa de probabilidade. Tracking foca em gráficos de progresso. Registro é minimalista, só pra lançar notas rápido.</p>
+      </div>
+
+      <div class="config-section">
+        <div class="config-section-title">Sobre</div>
+        <p class="config-text">CR9 · PWA pessoal pra tracking do Ibmec Stars (CR 9,0 = 450 pts de 500, em 4+ disciplinas).</p>
+        <p class="config-text muted" id="config-version">v1</p>
+      </div>
+
+      <div class="config-section">
+        <div class="config-section-title">Dados</div>
+        <p class="config-text">exporta ou importa o estado (disciplinas, notas, TP, histórico) como JSON.</p>
+        <div class="btn-row">
+          <button class="btn secondary sm" id="btn-export">exportar</button>
+          <button class="btn secondary sm" id="btn-import">importar</button>
+        </div>
+      </div>
+
+      <div class="danger-zone">
+        <div class="danger-zone-head">
+          <span class="danger-zone-label">Zona de risco</span>
+        </div>
+        <p class="danger-zone-hint">apaga disciplinas, notas, TP e histórico deste período. exige 3 confirmações.</p>
+        <button class="btn danger sm" id="btn-reset-periodo">resetar período</button>
       </div>
     </div>
   </div>

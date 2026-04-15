@@ -91,6 +91,23 @@ const GREET_VOCATIVOS = [
   'maestro'
 ];
 
+const GREET_VOCATIVOS_F = [
+  'champs','monstra','mestra','chefa','lenda','feroz','patroa','guerreira',
+  'craque','braba','parceira','ídola','fenômena','rainha','maestrina'
+];
+
+const FEM_SUBS = [
+  [/\bmeu consagrado\b/g, 'minha consagrada'],
+  [/\bacordou ligado\b/g, 'acordou ligada'],
+  [/\bbem-vindo\b/g,      'bem-vinda'],
+  [/\bo autor\b/g,        'a autora']
+];
+function feminize(s) {
+  let out = s;
+  for (const [re, rep] of FEM_SUBS) out = out.replace(re, rep);
+  return out;
+}
+
 const GREET_FREEFORM = {
   any: [
     'voltou pra operação',
@@ -179,7 +196,7 @@ function pickRandom(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
-function getSaudacao() {
+function getSaudacao(gender) {
   const h = new Date().getHours();
   let timeKey;
   if (h < 5) timeKey = 'madrugada';
@@ -187,20 +204,40 @@ function getSaudacao() {
   else if (h < 18) timeKey = 'tarde';
   else timeKey = 'noite';
 
+  const fem = gender === 'f';
+  const vocPool = fem ? GREET_VOCATIVOS_F : GREET_VOCATIVOS;
+
+  let raw;
   // 45% classic (opener + vocativo, tail), 55% freeform
   if (Math.random() < 0.45) {
     const bucket = GREET_BY_TIME[timeKey];
     const useNeutral = Math.random() < 0.3;
     const opener = useNeutral ? pickRandom(GREET_NEUTRAL) : pickRandom(bucket);
-    const voc = pickRandom(GREET_VOCATIVOS);
+    const voc = pickRandom(vocPool);
     const tail = pickRandom(GREET_TAILS);
-    const raw = opener + ' ' + voc + ', ' + tail;
-    return raw.charAt(0).toUpperCase() + raw.slice(1);
+    raw = opener + ' ' + voc + ', ' + tail;
+  } else {
+    const pool = GREET_FREEFORM.any.concat(GREET_FREEFORM[timeKey] || []);
+    raw = pickRandom(pool);
   }
 
-  const pool = GREET_FREEFORM.any.concat(GREET_FREEFORM[timeKey] || []);
-  const raw = pickRandom(pool);
+  if (fem) raw = feminize(raw);
   return raw.charAt(0).toUpperCase() + raw.slice(1);
+}
+
+function migrateState(s) {
+  if (!s || typeof s !== 'object') return s;
+  if (!Array.isArray(s.disciplinas)) s.disciplinas = [];
+  if (!s.tp || typeof s.tp !== 'object') s.tp = { value: null, expectativa: false, applyTo: null };
+  if (!Array.isArray(s.recentes)) s.recentes = [];
+  if (s.gender === undefined) s.gender = null;
+  if (s.foco === undefined) s.foco = null;
+  s.disciplinas.forEach(d => {
+    if (d.showAS === undefined) d.showAS = false;
+    if (!d.acs) d.acs = [];
+  });
+  s.v = 2;
+  return s;
 }
 
 function loadState() {
@@ -208,15 +245,17 @@ function loadState() {
     const raw = localStorage.getItem(KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === 'object') return parsed;
+      if (parsed && typeof parsed === 'object') return migrateState(parsed);
     }
   } catch (e) {}
-  return {
-    v: 1,
+  return migrateState({
+    v: 2,
     disciplinas: [],
     tp: { value: null, expectativa: false, applyTo: null },
-    recentes: []
-  };
+    recentes: [],
+    gender: null,
+    foco: null
+  });
 }
 
 function saveState() {
@@ -402,9 +441,10 @@ function renderSegBar() {
   }
   el.innerHTML = state.disciplinas.map(d => {
     const r = calcDisc(d);
-    const distW = Math.max(0, Math.min(100, r.dist));
-    const earnedW = Math.max(0, Math.min(100, r.earned));
-    const title = escapeHTML(d.nome) + ' — ' + fmtNum(r.earned, 1) + '/' + fmtNum(r.dist, 0) + ' pts';
+    const tpB = tpBonusForDisc(d.id);
+    const distW = Math.max(0, Math.min(100, r.dist + tpB));
+    const earnedW = Math.max(0, Math.min(100, r.earned + tpB));
+    const title = escapeHTML(d.nome) + ' — ' + fmtNum(r.earned + tpB, 1) + '/' + fmtNum(r.dist + tpB, 0) + ' pts';
     return '<div class="seg" title="' + title + '">'
       + '<div class="seg-dist-fill" style="width:' + distW + '%"></div>'
       + '<div class="seg-earned-fill" style="width:' + earnedW + '%"></div>'
@@ -528,11 +568,34 @@ function renderProbCard(p) {
 
 function discStatus(d) {
   const r = calcDisc(d);
-  if (r.dist === 0) return '';
-  const pct = (r.earned / r.dist) * 100;
+  const tpB = tpBonusForDisc(d.id);
+  const earnedTotal = r.earned + tpB;
+  const distTotal = r.dist + tpB;
+  if (distTotal === 0) return '';
+  const pct = (earnedTotal / distTotal) * 100;
   if (pct >= 70) return 'ok';
   if (pct >= 60) return 'warn';
   return 'danger';
+}
+
+function tpBonusForDisc(discId) {
+  if (!state.tp || state.tp.value == null || state.tp.applyTo !== discId) return 0;
+  return Math.round(state.tp.value * 10);
+}
+
+function calcDiscOficialOnly(d) {
+  const ap1Slot = d.ap1 && !d.ap1.expectativa ? d.ap1 : { value: null, expectativa: false };
+  const ap2Slot = d.ap2 && !d.ap2.expectativa ? d.ap2 : { value: null, expectativa: false };
+  const asSlot = d.as && !d.as.expectativa ? d.as : { value: null, expectativa: false, taken: d.as ? d.as.taken : false };
+  const oficialAcs = (d.acs || []).map(ac => {
+    if (d.acMode === 'equal') {
+      return { ...ac };
+    }
+    if (ac.expectativa) return { ...ac, value: null };
+    return { ...ac };
+  });
+  const dummy = { ...d, ap1: ap1Slot, ap2: ap2Slot, as: asSlot, acs: oficialAcs };
+  return calcDisc(dummy);
 }
 
 // ───────── NAVEGAÇÃO ─────────
@@ -549,11 +612,43 @@ function goto(id) {
   if (id === 's-disciplinas') renderDisciplinas();
   if (id === 's-detalhe') renderDetalhe();
   if (id === 's-simulador') renderSimulador();
+  if (id === 's-config') renderConfig();
 }
 
 // ───────── RENDER: HOME ─────────
 
 function renderHome() {
+  const tagEl = document.getElementById('hdr-tagline');
+  if (tagEl) tagEl.textContent = getSaudacao(state.gender);
+
+  const gateNeeded = state.gender == null || state.foco == null;
+  const views = {
+    gate: document.getElementById('home-setup-gate'),
+    stars: document.getElementById('home-stars'),
+    tracking: document.getElementById('home-tracking'),
+    registro: document.getElementById('home-registro')
+  };
+  Object.values(views).forEach(v => { if (v) v.hidden = true; });
+
+  if (gateNeeded) {
+    if (views.gate) views.gate.hidden = false;
+    return;
+  }
+
+  const foco = state.foco;
+  if (foco === 'tracking') {
+    if (views.tracking) views.tracking.hidden = false;
+    renderHomeTracking();
+  } else if (foco === 'registro') {
+    if (views.registro) views.registro.hidden = false;
+    renderHomeRegistro();
+  } else {
+    if (views.stars) views.stars.hidden = false;
+    renderHomeStars();
+  }
+}
+
+function renderHomeStars() {
   const p = calcPeriodo();
 
   // Stars hero
@@ -664,12 +759,14 @@ function renderHome() {
   } else {
     bdBody.innerHTML = state.disciplinas.map(d => {
       const r = calcDisc(d);
-      const earnedW = Math.max(0, Math.min(100, r.earned));
-      const distW = Math.max(0, Math.min(100, r.dist));
+      const tpB = tpBonusForDisc(d.id);
+      const earnedW = Math.max(0, Math.min(100, r.earned + tpB));
+      const distW = Math.max(0, Math.min(100, r.dist + tpB));
+      const tpBadge = tpB > 0 ? ' <span class="tp-badge">+' + tpB + ' TP</span>' : '';
       return '<div class="bd-row">'
         + '<div class="bd-head">'
-        + '<span class="bd-name">' + escapeHTML(d.nome) + '</span>'
-        + '<span class="bd-val">' + fmtNum(r.earned, 1) + '/100</span>'
+        + '<span class="bd-name">' + escapeHTML(d.nome) + tpBadge + '</span>'
+        + '<span class="bd-val">' + fmtNum(r.earned + tpB, 1) + '/100</span>'
         + '</div>'
         + '<div class="bd-bar">'
         + '<div class="bd-dist" style="width:' + distW + '%"></div>'
@@ -699,6 +796,215 @@ function renderHome() {
   }
 }
 
+// ───────── RENDER: HOME TRACKING ─────────
+
+function renderHomeTracking() {
+  const p = calcPeriodo();
+
+  // KPI strip
+  const kpis = document.getElementById('track-kpis');
+  if (kpis) {
+    const aprovTxt = p.aprov !== null ? fmtNum(p.aprov, 1) + '%' : '—';
+    const projTxt = fmtNum(p.totalScore, 0) + ' / ' + (p.starsNeeded || 450);
+    kpis.innerHTML = ''
+      + '<div class="track-kpi"><div class="track-kpi-label">aproveitamento</div><div class="track-kpi-value">' + aprovTxt + '</div></div>'
+      + '<div class="track-kpi"><div class="track-kpi-label">ganhos / lançados</div><div class="track-kpi-value">' + fmtNum(p.earnedReg, 0) + ' / ' + fmtNum(p.distReg, 0) + '</div></div>'
+      + '<div class="track-kpi"><div class="track-kpi-label">projeção stars</div><div class="track-kpi-value">' + projTxt + '</div></div>';
+  }
+
+  // Expectativa vs Oficial
+  const evo = document.getElementById('track-exp-vs-of');
+  if (evo) {
+    if (state.disciplinas.length === 0) {
+      evo.innerHTML = '<p class="hint">crie disciplinas pra ver</p>';
+    } else {
+      evo.innerHTML = state.disciplinas.map(d => {
+        const all = calcDisc(d);
+        const of = calcDiscOficialOnly(d);
+        const expExtra = Math.max(0, all.earned - of.earned);
+        const ofW = Math.max(0, Math.min(100, of.earned));
+        const expW = Math.max(0, Math.min(100 - ofW, expExtra));
+        return '<div class="track-bar-row">'
+          + '<div class="track-bar-head"><span>' + escapeHTML(d.nome) + '</span><span>' + fmtNum(of.earned, 0) + ' + ' + fmtNum(expExtra, 0) + '</span></div>'
+          + '<div class="track-bar"><div class="track-bar-of" style="width:' + ofW + '%"></div><div class="track-bar-exp" style="left:' + ofW + '%;width:' + expW + '%"></div></div>'
+          + '</div>';
+      }).join('');
+    }
+  }
+
+  // Timeline SVG sparkline
+  const tl = document.getElementById('track-timeline');
+  if (tl) {
+    const recs = (state.recentes || []).slice().reverse();
+    if (recs.length === 0) {
+      tl.innerHTML = '<p class="hint">sem lançamentos pra plotar</p>';
+    } else {
+      const w = 320, h = 80, pad = 6;
+      const cum = [];
+      let acc = 0;
+      recs.forEach(r => { acc += (typeof r.valor === 'number' ? r.valor : 0); cum.push(acc); });
+      const maxV = Math.max.apply(null, cum) || 1;
+      const stepX = (w - pad * 2) / Math.max(1, cum.length - 1);
+      const pts = cum.map((v, i) => {
+        const x = pad + i * stepX;
+        const y = h - pad - (v / maxV) * (h - pad * 2);
+        return x.toFixed(1) + ',' + y.toFixed(1);
+      });
+      const dots = cum.map((v, i) => {
+        const x = pad + i * stepX;
+        const y = h - pad - (v / maxV) * (h - pad * 2);
+        return '<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="2.5"/>';
+      }).join('');
+      tl.innerHTML = '<svg class="track-svg" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none">'
+        + '<polyline points="' + pts.join(' ') + '" fill="none" stroke="currentColor" stroke-width="1.5"/>'
+        + dots
+        + '</svg>';
+    }
+  }
+
+  // Aproveitamento per disciplina
+  const apr = document.getElementById('track-aprov-list');
+  if (apr) {
+    if (state.disciplinas.length === 0) {
+      apr.innerHTML = '<p class="hint">crie disciplinas pra ver</p>';
+    } else {
+      const items = state.disciplinas.map(d => {
+        const r = calcDisc(d);
+        const tpB = tpBonusForDisc(d.id);
+        const e = r.earned + tpB;
+        const dist = r.dist + tpB;
+        const pct = dist > 0 ? (e / dist) * 100 : 0;
+        return { d, pct };
+      }).sort((a, b) => b.pct - a.pct);
+      apr.innerHTML = items.map(it =>
+        '<div class="track-bar-row">'
+        + '<div class="track-bar-head"><span>' + escapeHTML(it.d.nome) + '</span><span>' + fmtNum(it.pct, 0) + '%</span></div>'
+        + '<div class="track-bar"><div class="track-bar-of" style="width:' + Math.max(0, Math.min(100, it.pct)) + '%"></div></div>'
+        + '</div>'
+      ).join('');
+    }
+  }
+
+  // Progressão SVG
+  const pr = document.getElementById('track-progress');
+  if (pr) {
+    const recs = (state.recentes || []).slice().reverse();
+    if (recs.length === 0) {
+      pr.innerHTML = '<p class="hint">sem dados de progressão</p>';
+    } else {
+      const w = 320, h = 100, pad = 8;
+      const cum = [];
+      let acc = 0;
+      recs.forEach(r => { acc += (typeof r.valor === 'number' ? r.valor : 0); cum.push(acc); });
+      const need = p.starsNeeded || 450;
+      const maxV = Math.max(need, cum[cum.length - 1] || 1);
+      const stepX = (w - pad * 2) / Math.max(1, cum.length - 1);
+      const pts = cum.map((v, i) => {
+        const x = pad + i * stepX;
+        const y = h - pad - (v / maxV) * (h - pad * 2);
+        return x.toFixed(1) + ',' + y.toFixed(1);
+      });
+      const areaPts = [pad + ',' + (h - pad)].concat(pts).concat([(pad + (cum.length - 1) * stepX).toFixed(1) + ',' + (h - pad)]);
+      const needY = (h - pad - (need / maxV) * (h - pad * 2)).toFixed(1);
+      pr.innerHTML = '<svg class="track-svg" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none">'
+        + '<polygon points="' + areaPts.join(' ') + '" fill="currentColor" fill-opacity="0.18"/>'
+        + '<polyline points="' + pts.join(' ') + '" fill="none" stroke="currentColor" stroke-width="1.5"/>'
+        + '<line x1="' + pad + '" y1="' + needY + '" x2="' + (w - pad) + '" y2="' + needY + '" stroke="currentColor" stroke-dasharray="3 3" stroke-opacity="0.6"/>'
+        + '<text x="' + (w - pad) + '" y="' + (parseFloat(needY) - 2) + '" text-anchor="end" font-size="9" fill="currentColor" fill-opacity="0.7">stars ' + need + '</text>'
+        + '</svg>';
+    }
+  }
+
+  // TP contribution
+  const tpEl = document.getElementById('track-tp');
+  if (tpEl) {
+    if (!state.tp || state.tp.value == null) {
+      tpEl.innerHTML = '<p class="hint">sem nota TP lançada</p>';
+    } else {
+      const bonus = Math.round(state.tp.value * 10);
+      const disc = state.disciplinas.find(x => x.id === state.tp.applyTo);
+      tpEl.innerHTML = '<div class="track-tp-line"><strong>+' + bonus + ' pts</strong> em ' + (disc ? escapeHTML(disc.nome) : '<em>sem disciplina</em>') + '</div>'
+        + '<div class="track-tp-line muted">nota bruta ' + fmtNum(state.tp.value, 3) + '</div>';
+    }
+  }
+}
+
+// ───────── RENDER: HOME REGISTRO ─────────
+
+function renderHomeRegistro() {
+  // Chips
+  const chips = document.getElementById('reg-chips');
+  if (chips) {
+    if (state.disciplinas.length === 0) {
+      chips.innerHTML = '<p class="hint">crie disciplinas primeiro</p>';
+    } else {
+      chips.innerHTML = state.disciplinas.map(d =>
+        '<button class="reg-chip" data-disc="' + d.id + '">' + escapeHTML(d.nome) + '</button>'
+      ).join('');
+      chips.querySelectorAll('.reg-chip').forEach(el => {
+        el.onclick = () => openDetalhe(el.dataset.disc);
+      });
+    }
+  }
+
+  // Recentes
+  const lista = document.getElementById('reg-recentes');
+  if (lista) {
+    if (!state.recentes || state.recentes.length === 0) {
+      lista.innerHTML = '<li class="empty">nenhum lançamento ainda</li>';
+    } else {
+      lista.innerHTML = state.recentes.map(r => {
+        const exp = r.kind === 'expectativa';
+        const badge = exp ? '<span class="badge-exp">prev</span>' : '';
+        const maxStr = r.max ? '<span class="rec-val-max"> / ' + fmtNum(r.max, 1) + '</span>' : '';
+        return '<li class="rec-item' + (exp ? ' exp' : '') + '">'
+          + '<div class="rec-body">'
+          + '<div class="rec-disc">' + escapeHTML(r.discNome || '—') + ' ' + badge + '</div>'
+          + '<div class="rec-tipo">' + escapeHTML(r.label || '') + '</div>'
+          + '</div>'
+          + '<div class="rec-val">' + fmtNum(r.valor, 2) + maxStr + '</div>'
+          + '</li>';
+      }).join('');
+    }
+  }
+
+  // Slim progress per disciplina
+  const prog = document.getElementById('reg-progress');
+  if (prog) {
+    if (state.disciplinas.length === 0) {
+      prog.innerHTML = '';
+    } else {
+      prog.innerHTML = state.disciplinas.map(d => {
+        const r = calcDisc(d);
+        const tpB = tpBonusForDisc(d.id);
+        const e = r.earned + tpB;
+        const dist = r.dist + tpB;
+        const w = Math.max(0, Math.min(100, e));
+        const tpBadge = tpB > 0 ? ' <span class="tp-badge">+' + tpB + '</span>' : '';
+        return '<div class="reg-row">'
+          + '<div class="reg-row-head"><span>' + escapeHTML(d.nome) + tpBadge + '</span><span>' + fmtNum(e, 0) + '/100</span></div>'
+          + '<div class="reg-bar"><div class="reg-bar-fill" style="width:' + w + '%"></div></div>'
+          + '</div>';
+      }).join('');
+    }
+  }
+}
+
+// ───────── RENDER: CONFIG ─────────
+
+function renderConfig() {
+  document.querySelectorAll('#pref-gender input[name="gender"]').forEach(inp => {
+    inp.checked = (state.gender === inp.value);
+    const lbl = inp.closest('label');
+    if (lbl) lbl.classList.toggle('selected', inp.checked);
+  });
+  document.querySelectorAll('#pref-foco input[name="foco"]').forEach(inp => {
+    inp.checked = (state.foco === inp.value);
+    const lbl = inp.closest('label');
+    if (lbl) lbl.classList.toggle('selected', inp.checked);
+  });
+}
+
 // ───────── RENDER: DISCIPLINAS ─────────
 
 function renderDisciplinas() {
@@ -709,16 +1015,20 @@ function renderDisciplinas() {
   }
   lista.innerHTML = state.disciplinas.map(d => {
     const r = calcDisc(d);
+    const tpB = tpBonusForDisc(d.id);
+    const earnedT = r.earned + tpB;
+    const distT = r.dist + tpB;
     const status = discStatus(d);
-    const pct = r.dist > 0 ? (r.earned / r.dist * 100) : 0;
-    const metaDist = fmtNum(r.dist, 0);
-    const metaEarned = fmtNum(r.earned, 1);
+    const pct = distT > 0 ? (earnedT / distT * 100) : 0;
+    const metaDist = fmtNum(distT, 0);
+    const metaEarned = fmtNum(earnedT, 1);
+    const tpBadge = tpB > 0 ? ' <span class="tp-badge">+' + tpB + ' TP</span>' : '';
     return '<li class="disc-item ' + status + '" data-id="' + d.id + '">'
       + '<div class="disc-info">'
-      + '<div class="disc-nome">' + escapeHTML(d.nome) + '</div>'
+      + '<div class="disc-nome">' + escapeHTML(d.nome) + tpBadge + '</div>'
       + '<div class="disc-meta">' + metaEarned + '/' + metaDist + ' lançados · ' + fmtNum(pct, 0) + '%</div>'
       + '</div>'
-      + '<div class="disc-pts">' + fmtNum(r.earned, 0) + '<span class="disc-pts-max"> / 100</span></div>'
+      + '<div class="disc-pts">' + fmtNum(earnedT, 0) + '<span class="disc-pts-max"> / 100</span></div>'
       + '<div class="disc-chevron">›</div>'
       + '</li>';
   }).join('');
@@ -758,24 +1068,39 @@ function renderDetalhe() {
   const d = state.disciplinas.find(x => x.id === currentDiscId);
   if (!d) { goto('s-disciplinas'); return; }
 
-  document.getElementById('det-nome').textContent = d.nome;
+  const tpB = tpBonusForDisc(d.id);
+  document.getElementById('det-nome').innerHTML =
+    escapeHTML(d.nome) + (tpB > 0 ? ' <span class="tp-badge">+' + tpB + ' TP</span>' : '');
 
   const r = calcDisc(d);
-  document.getElementById('det-earned').textContent = fmtNum(r.earned, 1);
-  document.getElementById('det-dist').textContent = fmtNum(r.dist, 0);
-  const pct = r.dist > 0 ? (r.earned / r.dist * 100) : 0;
+  const earnedT = r.earned + tpB;
+  const distT = r.dist + tpB;
+  document.getElementById('det-earned').textContent = fmtNum(earnedT, 1);
+  document.getElementById('det-dist').textContent = fmtNum(distT, 0);
+  const pct = distT > 0 ? (earnedT / distT * 100) : 0;
   const detBar = document.getElementById('det-bar');
-  detBar.style.width = Math.max(0, Math.min(100, r.earned)) + '%';
-  if (r.dist === 0) detBar.className = 'bar-fill';
+  detBar.style.width = Math.max(0, Math.min(100, earnedT)) + '%';
+  if (distT === 0) detBar.className = 'bar-fill';
   else if (pct >= 70) detBar.className = 'bar-fill success';
   else if (pct >= 60) detBar.className = 'bar-fill warning';
   else detBar.className = 'bar-fill danger';
 
   document.getElementById('det-status').textContent =
-    r.dist === 0 ? 'sem notas'
+    distT === 0 ? 'sem notas'
     : pct >= 70 ? 'aproveitamento ' + fmtNum(pct, 1) + '% · dentro da média'
     : pct >= 60 ? 'aproveitamento ' + fmtNum(pct, 1) + '% · abaixo da média'
     : 'aproveitamento ' + fmtNum(pct, 1) + '% · muito abaixo';
+
+  // AS toggle wiring (use .onchange to avoid stacking)
+  const chk = document.getElementById('chk-show-as');
+  if (chk) {
+    chk.checked = d.showAS === true;
+    chk.onchange = () => {
+      d.showAS = chk.checked;
+      saveState();
+      renderDetalhe();
+    };
+  }
 
   document.getElementById('row-ap1').innerHTML = gradeDisplay(d.ap1, 40) + gradeActions('ap1');
   document.getElementById('row-ap2').innerHTML = gradeDisplay(d.ap2, 40) + gradeActions('ap2');
@@ -855,7 +1180,15 @@ function renderDetalhe() {
   const rowAS = document.getElementById('row-as');
   const asInfo = document.getElementById('as-info');
   const belowCutoff = r.earned < 70;
-  if (belowCutoff || d.as.taken || d.as.value !== null) {
+  const forceShow = d.showAS === true;
+  const acsAssigned = (d.acs || []).every(ac => {
+    if ((d.acMode || 'custom') === 'equal') return ac.delivered === true || ac.delivered === false;
+    return ac.value !== null && ac.value !== undefined;
+  });
+  const allGradesAssigned = d.ap1.value !== null && d.ap1.value !== undefined
+    && d.ap2.value !== null && d.ap2.value !== undefined
+    && acsAssigned;
+  if (forceShow || allGradesAssigned || belowCutoff || d.as.taken || d.as.value !== null) {
     rowAS.hidden = false;
     asInfo.style.display = 'none';
     rowAS.innerHTML = gradeDisplay(d.as, 40) + gradeActions('as');
@@ -1096,7 +1429,8 @@ function openModalAddDisc() {
         ap2: { value: null, expectativa: false },
         as: { value: null, expectativa: false, taken: false },
         acs: [],
-        acMode: 'custom'
+        acMode: 'custom',
+        showAS: false
       });
       saveState();
       renderDisciplinas();
@@ -1423,12 +1757,14 @@ document.getElementById('btn-reset-periodo').addEventListener('click', () => {
   if (!confirm('Resetar o período? Isso apaga TODAS as disciplinas, notas, TP e histórico. (1/3)')) return;
   if (!confirm('Tem certeza? Esta ação é irreversível — nada pode ser recuperado. (2/3)')) return;
   if (!confirm('Última chance. Confirmar apagar tudo? (3/3)')) return;
-  state = {
-    v: 1,
+  state = migrateState({
+    v: 2,
     disciplinas: [],
     tp: { value: null, expectativa: false, applyTo: null },
-    recentes: []
-  };
+    recentes: [],
+    gender: state.gender,
+    foco: state.foco
+  });
   saveState();
   simState = {};
   currentDiscId = null;
@@ -1482,9 +1818,88 @@ document.getElementById('btn-fill-max-sim').addEventListener('click', () => {
 });
 
 // Header saudação + meta date
-document.getElementById('hdr-tagline').textContent = getSaudacao();
+document.getElementById('hdr-tagline').textContent = getSaudacao(state.gender);
 document.getElementById('hdr-meta').textContent =
   new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' });
+
+// ───────── CONFIG BINDINGS ─────────
+
+document.querySelectorAll('#pref-gender input[name="gender"]').forEach(inp => {
+  inp.addEventListener('change', () => {
+    if (!inp.checked) return;
+    state.gender = inp.value;
+    saveState();
+    document.getElementById('hdr-tagline').textContent = getSaudacao(state.gender);
+    renderConfig();
+  });
+});
+document.querySelectorAll('#pref-foco input[name="foco"]').forEach(inp => {
+  inp.addEventListener('change', () => {
+    if (!inp.checked) return;
+    state.foco = inp.value;
+    saveState();
+    renderConfig();
+    renderHome();
+  });
+});
+
+// Export / Import
+document.getElementById('btn-export').addEventListener('click', () => {
+  try {
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const ymd = new Date().toISOString().slice(0, 10);
+    a.href = url;
+    a.download = 'cr9-' + ymd + '.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (e) {
+    alert('Falha ao exportar: ' + (e && e.message ? e.message : e));
+  }
+});
+
+document.getElementById('btn-import').addEventListener('click', () => {
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  inp.accept = 'application/json,.json';
+  inp.onchange = () => {
+    const file = inp.files && inp.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(reader.result);
+        if (!parsed || typeof parsed !== 'object'
+            || !Array.isArray(parsed.disciplinas)
+            || !parsed.tp || typeof parsed.tp !== 'object') {
+          alert('Arquivo inválido: faltam disciplinas ou tp.');
+          return;
+        }
+        if (!confirm('Substituir o estado atual pelo conteúdo do arquivo? Esta ação não pode ser desfeita.')) return;
+        state = migrateState(parsed);
+        currentDiscId = null;
+        simState = {};
+        saveState();
+        renderConfig();
+        renderDisciplinas();
+        renderHome();
+        alert('Importado com sucesso.');
+      } catch (e) {
+        alert('Falha ao importar: ' + (e && e.message ? e.message : e));
+      }
+    };
+    reader.onerror = () => alert('Erro ao ler arquivo.');
+    reader.readAsText(file);
+  };
+  inp.click();
+});
+
+// Registro: TP button reuses TP modal
+const btnTpReg = document.getElementById('btn-edit-tp-reg');
+if (btnTpReg) btnTpReg.addEventListener('click', openModalTP);
 
 // ───────── SERVICE WORKER ─────────
 
