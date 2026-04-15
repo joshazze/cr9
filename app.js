@@ -398,8 +398,8 @@ function calcPeriodo(sim = {}) {
 }
 
 function normalCdf(z) {
-  if (z < -6) return 0;
-  if (z > 6) return 1;
+  if (z > 38) return 1;
+  if (z < -38) return 0;
   const t = 1 / (1 + 0.2316419 * Math.abs(z));
   const d = 0.3989422804014327 * Math.exp(-z * z / 2);
   const poly = t * (0.319381530 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))));
@@ -574,7 +574,7 @@ function renderProbCard(p) {
   }
 
   // computed
-  if (prob.pct > 0 && prob.pct < 0.00001) {
+  if (prob.pct < 0.00001) {
     setPct('ínfima', { noSym: true });
   } else {
     setPct(fmtPct(prob.pct));
@@ -598,8 +598,11 @@ function renderProbCard(p) {
   needEl.textContent = needRateTxt + ' de ' + fmtNum(prob.remaining, 0);
   rateEl.textContent = fmtNum(prob.rate, 1) + '%';
 
-  if (prob.needRate <= prob.rate) {
-    hintEl.textContent = 'mantendo seu rendimento, você chega lá — ' + fmtNum(prob.pct, 0) + '% de chance';
+  if (prob.pct < 0.00001) {
+    const gap = Math.max(0, prob.needRate - prob.rate);
+    hintEl.textContent = 'chance ínfima — precisa subir ' + fmtNum(gap, 0) + ' pts% no rendimento pros ' + fmtNum(prob.remaining, 0) + ' restantes';
+  } else if (prob.needRate <= prob.rate) {
+    hintEl.textContent = 'mantendo seu rendimento, você chega lá — ' + fmtPct(prob.pct) + '% de chance';
   } else {
     const gap = prob.needRate - prob.rate;
     hintEl.textContent = 'precisa subir ' + fmtNum(gap, 0) + ' pts% no rendimento pros ' + fmtNum(prob.remaining, 0) + ' restantes';
