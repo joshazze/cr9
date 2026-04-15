@@ -1183,7 +1183,11 @@ function renderDetalhe() {
       el.addEventListener('click', (e) => {
         e.stopPropagation();
         if (confirm('Excluir atividade?')) {
-          d.acs = d.acs.filter(a => a.id !== el.dataset.acDel);
+          const acDelId = el.dataset.acDel;
+          d.acs = d.acs.filter(a => a.id !== acDelId);
+          if (simState.disc && simState.disc[d.id] && simState.disc[d.id].acs) {
+            delete simState.disc[d.id].acs[acDelId];
+          }
           saveState();
           renderDetalhe();
         }
@@ -1682,6 +1686,10 @@ function openModalAddAc() {
       const valor = parseFloat(document.getElementById('m-valor').value);
       if (!nome) { alert('Nome obrigatório'); return false; }
       if (isNaN(valor) || valor <= 0) { alert('Valor inválido'); return false; }
+      if (valor > restante + 0.0001) {
+        alert('Valor excede o restante do pool de AC (' + fmtNum(restante, 1) + ' pts).');
+        return false;
+      }
       d.acs.push({ id: uid(), nome, valor, value: null, expectativa: false, delivered: null });
       saveState();
       renderDetalhe();

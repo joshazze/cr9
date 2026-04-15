@@ -2,6 +2,7 @@
   "name": "CR9 · Ibmec",
   "short_name": "CR9",
   "description": "Controle de notas e simulação do Ibmec Stars.",
+  "id": "./",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
