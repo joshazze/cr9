@@ -484,16 +484,19 @@ function renderProbCard(p) {
   // Auto-shrink pct display pra não sobrepor o label "Chances do Stars"
   // quando o texto fica longo (ex.: "0,000347").
   const bigEl = pctEl.closest('.prob-big');
-  const setPct = (txt) => {
+  const symEl = document.getElementById('prob-pct-sym');
+  const setPct = (txt, opts) => {
     pctEl.textContent = txt;
+    const showSym = !(opts && opts.noSym);
+    if (symEl) symEl.style.display = showSym ? '' : 'none';
     if (!bigEl) return;
-    const len = String(txt).length;
-    const size = len <= 3 ? 46
-      : len === 4 ? 42
-      : len === 5 ? 36
-      : len === 6 ? 30
-      : len === 7 ? 26
-      : len === 8 ? 22
+    const effLen = String(txt).length + (showSym ? 1 : 0);
+    const size = effLen <= 3 ? 46
+      : effLen === 4 ? 42
+      : effLen === 5 ? 36
+      : effLen === 6 ? 30
+      : effLen === 7 ? 26
+      : effLen === 8 ? 22
       : 18;
     bigEl.style.fontSize = size + 'px';
   };
@@ -571,7 +574,11 @@ function renderProbCard(p) {
   }
 
   // computed
-  setPct(fmtPct(prob.pct));
+  if (prob.pct > 0 && prob.pct < 0.00001) {
+    setPct('ínfima', { noSym: true });
+  } else {
+    setPct(fmtPct(prob.pct));
+  }
   barEl.style.width = Math.max(2, Math.min(100, prob.pct)) + '%';
 
   let band, label, cls;
