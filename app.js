@@ -481,8 +481,25 @@ function renderProbCard(p) {
 
   cardEl.className = 'prob-card';
 
+  // Auto-shrink pct display pra não sobrepor o label "Chances do Stars"
+  // quando o texto fica longo (ex.: "0,000347").
+  const bigEl = pctEl.closest('.prob-big');
+  const setPct = (txt) => {
+    pctEl.textContent = txt;
+    if (!bigEl) return;
+    const len = String(txt).length;
+    const size = len <= 3 ? 46
+      : len === 4 ? 42
+      : len === 5 ? 36
+      : len === 6 ? 30
+      : len === 7 ? 26
+      : len === 8 ? 22
+      : 18;
+    bigEl.style.fontSize = size + 'px';
+  };
+
   const reset = () => {
-    pctEl.textContent = '—';
+    setPct('—');
     barEl.style.width = '0%';
     barEl.className = 'bar-fill';
     statusEl.className = 'stars-status';
@@ -516,7 +533,7 @@ function renderProbCard(p) {
   if (prob.state === 'out') {
     reset();
     cardEl.classList.add('danger');
-    pctEl.textContent = '0';
+    setPct('0');
     barEl.style.width = '100%';
     barEl.className = 'bar-fill danger';
     statusEl.textContent = 'fora';
@@ -528,7 +545,7 @@ function renderProbCard(p) {
   }
   if (prob.state === 'locked') {
     cardEl.classList.add('success');
-    pctEl.textContent = '100';
+    setPct('100');
     barEl.style.width = '100%';
     barEl.className = 'bar-fill success';
     statusEl.textContent = 'garantido';
@@ -541,7 +558,7 @@ function renderProbCard(p) {
   }
   if (prob.state === 'impossible') {
     cardEl.classList.add('danger');
-    pctEl.textContent = '0';
+    setPct('0');
     barEl.style.width = '100%';
     barEl.className = 'bar-fill danger';
     statusEl.textContent = 'impossível';
@@ -554,7 +571,7 @@ function renderProbCard(p) {
   }
 
   // computed
-  pctEl.textContent = fmtPct(prob.pct);
+  setPct(fmtPct(prob.pct));
   barEl.style.width = Math.max(2, Math.min(100, prob.pct)) + '%';
 
   let band, label, cls;

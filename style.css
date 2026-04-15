@@ -887,7 +887,7 @@ header::before {
 }
 .prob-head-main .metric-label { margin-bottom: 0; }
 .prob-head-main .stars-status { align-self: flex-start; }
-.prob-head-aside { text-align: right; flex-shrink: 0; }
+.prob-head-aside { text-align: right; flex-shrink: 0; min-width: 0; }
 
 .prob-big {
   font-family: var(--serif);
@@ -897,13 +897,14 @@ header::before {
   line-height: 1;
   font-variant-numeric: tabular-nums;
   letter-spacing: -1.4px;
-  transition: color 0.3s;
+  white-space: nowrap;
+  transition: color 0.3s, font-size 0.2s;
 }
 .prob-card.success .prob-big { color: var(--success); }
 .prob-card.warning .prob-big { color: var(--warning); }
 .prob-card.danger .prob-big { color: var(--danger); }
 .prob-big-sym {
-  font-size: 22px;
+  font-size: 0.48em;
   font-weight: 400;
   margin-left: 2px;
   letter-spacing: -0.3px;
