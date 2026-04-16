@@ -1155,8 +1155,8 @@ function renderHomeTracking() {
   // Nível de desespero
   const desp = document.getElementById('track-desespero');
   if (desp) {
-    const missing = p.maxReg > 0 ? (1 - p.earnedReg / p.maxReg) * 100 : 0;
-    const pctDone = p.maxReg > 0 ? p.distReg / p.maxReg * 100 : 0;
+    const missing = p.total > 0 ? (1 - p.earnedReg / p.total) * 100 : 0;
+    const pctDone = p.total > 0 ? p.distReg / p.total * 100 : 0;
     let level, bar, emoji;
     if (pctDone < 20) { level = 'relaxado demais'; bar = 15; emoji = '😴'; }
     else if (aprov >= 85) { level = 'zen'; bar = 10; emoji = '🧘'; }
@@ -1204,7 +1204,7 @@ function renderHomeRegistro() {
   const summary = document.getElementById('reg-summary');
   if (summary) {
     const p = calcPeriodo();
-    const pct = p.maxReg > 0 ? Math.round(p.earnedReg / p.maxReg * 100) : 0;
+    const pct = p.total > 0 ? Math.round(p.earnedReg / p.total * 100) : 0;
     const starsOk = p.totalScore >= (p.starsNeeded || 450) && p.n >= 4;
     summary.innerHTML = ''
       + '<div class="reg-sum-item"><span class="reg-sum-num">' + fmtNum(p.totalScore, 0) + '</span><span class="reg-sum-lbl">pontos</span></div>'
