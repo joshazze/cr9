@@ -319,20 +319,43 @@ function connectSync(code) {
   const display = clean.slice(0, 3) + '-' + clean.slice(3);
   localStorage.setItem(SYNC_KEY, display);
   syncRef = firebase.database().ref('sync/' + clean);
-  syncRef.set({ ...state, _ts: Date.now() });
-  syncListener = syncRef.on('value', (snap) => {
+
+  // First read remote to avoid overwriting existing data with empty state
+  syncRef.once('value').then((snap) => {
     const remote = snap.val();
-    if (!remote || typeof remote !== 'object') return;
-    const localTs = Number(localStorage.getItem('cr9-sync-ts') || 0);
-    if (remote._ts && remote._ts <= localTs) return;
-    syncIsReceiving = true;
-    const cleaned = Object.assign({}, remote);
-    delete cleaned._ts;
-    state = migrateState(cleaned);
-    localStorage.setItem(KEY, JSON.stringify(state));
-    localStorage.setItem('cr9-sync-ts', String(remote._ts || Date.now()));
-    fullRerender();
-    syncIsReceiving = false;
+    const localHasData = state.disciplinas && state.disciplinas.length > 0;
+    const remoteHasData = remote && Array.isArray(remote.disciplinas) && remote.disciplinas.length > 0;
+
+    if (remoteHasData && !localHasData) {
+      // Remote has data, local is empty — adopt remote
+      syncIsReceiving = true;
+      const cleaned = Object.assign({}, remote);
+      delete cleaned._ts;
+      state = migrateState(cleaned);
+      localStorage.setItem(KEY, JSON.stringify(state));
+      fullRerender();
+      syncIsReceiving = false;
+    } else if (localHasData) {
+      // Local has data — push to remote
+      syncRef.set({ ...state, _ts: Date.now() });
+    }
+    localStorage.setItem('cr9-sync-ts', String(Date.now()));
+
+    // Now attach realtime listener
+    syncListener = syncRef.on('value', (snap2) => {
+      const r = snap2.val();
+      if (!r || typeof r !== 'object') return;
+      const localTs = Number(localStorage.getItem('cr9-sync-ts') || 0);
+      if (r._ts && r._ts <= localTs) return;
+      syncIsReceiving = true;
+      const cleaned = Object.assign({}, r);
+      delete cleaned._ts;
+      state = migrateState(cleaned);
+      localStorage.setItem(KEY, JSON.stringify(state));
+      localStorage.setItem('cr9-sync-ts', String(r._ts || Date.now()));
+      fullRerender();
+      syncIsReceiving = false;
+    });
   });
   renderSyncUI();
 }
@@ -1078,11 +1101,117 @@ function renderHomeTracking() {
         + '<div class="track-tp-line muted">nota bruta ' + fmtNum(state.tp.value, 3) + '</div>';
     }
   }
+
+  // ── Fun charts ──
+
+  const aprov = p.aprov || 0;
+
+  // Você vs Aluno Médio
+  const vsm = document.getElementById('track-vs-medio');
+  if (vsm) {
+    const medio = 68;
+    const you = Math.min(100, Math.round(aprov));
+    vsm.innerHTML = '<div class="track-vs">'
+      + '<div class="track-vs-row"><span class="track-vs-label">você</span><div class="track-bar"><div class="track-bar-of" style="width:' + you + '%"></div></div><span class="track-vs-val">' + you + '%</span></div>'
+      + '<div class="track-vs-row"><span class="track-vs-label">aluno médio</span><div class="track-bar"><div class="track-bar-avg" style="width:' + medio + '%"></div></div><span class="track-vs-val">' + medio + '%</span></div>'
+      + '</div>'
+      + '<p class="track-fun-hint">' + (you > medio ? 'acima da média. orgulho.' : you === medio ? 'na média certinha. estável.' : 'abaixo da média... bora reagir.') + '</p>';
+  }
+
+  // Seus professores gostam de você?
+  const profs = document.getElementById('track-profs');
+  if (profs) {
+    if (state.disciplinas.length === 0) {
+      profs.innerHTML = '<p class="hint">crie disciplinas pra descobrir</p>';
+    } else {
+      profs.innerHTML = state.disciplinas.map(d => {
+        const r = calcDisc(d);
+        const tpB = tpBonusForDisc(d.id);
+        const score = r.dist > 0 ? (r.earned + tpB) / (r.dist + tpB) * 100 : 0;
+        let emoji, msg;
+        if (score >= 90) { emoji = '😍'; msg = 'te ama'; }
+        else if (score >= 80) { emoji = '😊'; msg = 'te curte'; }
+        else if (score >= 70) { emoji = '😐'; msg = 'neutro'; }
+        else if (score >= 50) { emoji = '😒'; msg = 'desconfiado'; }
+        else { emoji = '💀'; msg = 'te odeia'; }
+        return '<div class="track-prof-row"><span class="track-prof-name">' + escapeHTML(d.nome) + '</span><span class="track-prof-verdict">' + emoji + ' ' + msg + '</span></div>';
+      }).join('');
+    }
+  }
+
+  // Você vs Einstein
+  const vse = document.getElementById('track-vs-einstein');
+  if (vse) {
+    const you = Math.min(100, Math.round(aprov));
+    const ein = 97;
+    const diff = ein - you;
+    vse.innerHTML = '<div class="track-vs">'
+      + '<div class="track-vs-row"><span class="track-vs-label">você</span><div class="track-bar"><div class="track-bar-of" style="width:' + you + '%"></div></div><span class="track-vs-val">' + you + '%</span></div>'
+      + '<div class="track-vs-row"><span class="track-vs-label">einstein</span><div class="track-bar"><div class="track-bar-genius" style="width:' + ein + '%"></div></div><span class="track-vs-val">' + ein + '%</span></div>'
+      + '</div>'
+      + '<p class="track-fun-hint">' + (diff <= 0 ? 'calma aí, gênio. superou o Einstein.' : diff <= 10 ? 'quase lá. falta pouco pro Nobel.' : diff <= 25 ? 'respeitável, mas Einstein ainda ganha.' : 'Einstein tá rindo de você.') + '</p>';
+  }
+
+  // Nível de desespero
+  const desp = document.getElementById('track-desespero');
+  if (desp) {
+    const missing = p.maxReg > 0 ? (1 - p.earnedReg / p.maxReg) * 100 : 0;
+    const pctDone = p.maxReg > 0 ? p.distReg / p.maxReg * 100 : 0;
+    let level, bar, emoji;
+    if (pctDone < 20) { level = 'relaxado demais'; bar = 15; emoji = '😴'; }
+    else if (aprov >= 85) { level = 'zen'; bar = 10; emoji = '🧘'; }
+    else if (aprov >= 70) { level = 'tranquilo'; bar = 30; emoji = '😌'; }
+    else if (aprov >= 55) { level = 'suando'; bar = 55; emoji = '😰'; }
+    else if (aprov >= 40) { level = 'desespero moderado'; bar = 75; emoji = '😱'; }
+    else { level = 'pânico total'; bar = 95; emoji = '🔥'; }
+    desp.innerHTML = '<div class="track-desp">'
+      + '<div class="track-desp-emoji">' + emoji + '</div>'
+      + '<div class="track-desp-level">' + level + '</div>'
+      + '<div class="track-bar"><div class="track-bar-desp" style="width:' + bar + '%"></div></div>'
+      + '</div>';
+  }
+
+  // Chance de sobreviver ao período
+  const sob = document.getElementById('track-sobreviver');
+  if (sob) {
+    let chance;
+    if (p.n === 0) chance = 50;
+    else if (aprov >= 85) chance = 98;
+    else if (aprov >= 70) chance = 85;
+    else if (aprov >= 55) chance = 60;
+    else if (aprov >= 40) chance = 35;
+    else chance = 12;
+    const jitter = Math.floor(Math.random() * 5) - 2;
+    chance = Math.max(1, Math.min(99, chance + jitter));
+    let msg;
+    if (chance >= 90) msg = 'praticamente garantido. relaxa.';
+    else if (chance >= 70) msg = 'tá no caminho. mantém o ritmo.';
+    else if (chance >= 50) msg = 'zona de risco. cuidado.';
+    else if (chance >= 30) msg = 'situação crítica. acorda.';
+    else msg = 'modo sobrevivência ativado.';
+    sob.innerHTML = '<div class="track-sobrev">'
+      + '<div class="track-sobrev-num">' + chance + '<span class="track-sobrev-pct">%</span></div>'
+      + '<div class="track-bar"><div class="track-bar-of" style="width:' + chance + '%"></div></div>'
+      + '<p class="track-fun-hint">' + msg + '</p>'
+      + '</div>';
+  }
 }
 
 // ───────── RENDER: HOME REGISTRO ─────────
 
 function renderHomeRegistro() {
+  // Summary strip
+  const summary = document.getElementById('reg-summary');
+  if (summary) {
+    const p = calcPeriodo();
+    const pct = p.maxReg > 0 ? Math.round(p.earnedReg / p.maxReg * 100) : 0;
+    const starsOk = p.totalScore >= (p.starsNeeded || 450) && p.n >= 4;
+    summary.innerHTML = ''
+      + '<div class="reg-sum-item"><span class="reg-sum-num">' + fmtNum(p.totalScore, 0) + '</span><span class="reg-sum-lbl">pontos</span></div>'
+      + '<div class="reg-sum-item"><span class="reg-sum-num">' + pct + '%</span><span class="reg-sum-lbl">aproveitamento</span></div>'
+      + '<div class="reg-sum-item"><span class="reg-sum-num ' + (starsOk ? 'on' : '') + '">' + (starsOk ? 'sim' : 'não') + '</span><span class="reg-sum-lbl">stars</span></div>';
+  }
+
   // Chips
   const chips = document.getElementById('reg-chips');
   if (chips) {
@@ -2099,9 +2228,11 @@ document.getElementById('btn-import').addEventListener('click', () => {
   inp.click();
 });
 
-// Registro: TP button reuses TP modal
+// Registro + Tracking: TP buttons reuse TP modal
 const btnTpReg = document.getElementById('btn-edit-tp-reg');
 if (btnTpReg) btnTpReg.addEventListener('click', openModalTP);
+const btnTpTrack = document.getElementById('btn-edit-tp-track');
+if (btnTpTrack) btnTpTrack.addEventListener('click', openModalTP);
 
 // ───────── SERVICE WORKER ─────────
 

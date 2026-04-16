@@ -2188,6 +2188,10 @@ header::before {
   font-weight: 600;
   color: var(--accent);
 }
+.track-tp-btn {
+  width: 100%;
+  margin-bottom: 16px;
+}
 .track-chart-card {
   background: var(--card);
   border: 1px solid var(--border);
@@ -2250,7 +2254,108 @@ header::before {
 }
 .track-tp-line.muted { color: var(--text-muted); font-size: 11px; }
 
+/* ── Fun tracking charts ── */
+.track-vs { display: flex; flex-direction: column; gap: 10px; }
+.track-vs-row { display: flex; align-items: center; gap: 8px; }
+.track-vs-label {
+  font: 500 0.75rem/1 var(--sans);
+  color: var(--text-muted);
+  width: 72px;
+  flex-shrink: 0;
+  text-align: right;
+}
+.track-vs-val {
+  font: 600 0.8rem/1 var(--sans);
+  color: var(--text);
+  width: 36px;
+  flex-shrink: 0;
+}
+.track-bar-avg {
+  height: 100%;
+  background: var(--text-muted);
+  border-radius: 999px;
+}
+.track-bar-genius {
+  height: 100%;
+  background: var(--warning);
+  border-radius: 999px;
+}
+.track-bar-desp {
+  height: 100%;
+  background: var(--danger);
+  border-radius: 999px;
+}
+.track-fun-hint {
+  font: 400 0.78rem/1.3 var(--sans);
+  color: var(--text-muted);
+  margin-top: 10px;
+  font-style: italic;
+}
+.track-prof-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.track-prof-row:last-child { border-bottom: none; }
+.track-prof-name { color: var(--text); font-weight: 500; }
+.track-prof-verdict { color: var(--text-muted); }
+.track-desp {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+}
+.track-desp-emoji { font-size: 2.5rem; }
+.track-desp-level {
+  font: 600 0.95rem/1 var(--sans);
+  color: var(--text);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.track-desp .track-bar { width: 100%; }
+.track-sobrev { text-align: center; padding: 8px 0; }
+.track-sobrev-num {
+  font: 600 2.5rem/1 var(--serif);
+  color: var(--accent);
+}
+.track-sobrev-pct {
+  font-size: 1.2rem;
+  color: var(--text-muted);
+}
+.track-sobrev .track-bar { margin: 12px 0; }
+
 /* ── Registro ── */
+.reg-summary {
+  display: flex;
+  justify-content: space-around;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 8px;
+  margin-bottom: 16px;
+}
+.reg-sum-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.reg-sum-num {
+  font: 600 1.3rem/1 var(--serif);
+  color: var(--text);
+}
+.reg-sum-num.on { color: var(--success); }
+.reg-sum-lbl {
+  font: 400 0.7rem/1 var(--sans);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .reg-chips {
   display: flex;
   gap: 8px;

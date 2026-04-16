@@ -156,6 +156,7 @@
 
       <div id="home-tracking" class="home-view" hidden>
         <div class="track-kpi-strip" id="track-kpis"></div>
+        <button class="btn secondary sm track-tp-btn" id="btn-edit-tp-track">Editar TP</button>
         <div class="track-chart-card">
           <div class="track-chart-title">Expectativa vs Oficial</div>
           <div id="track-exp-vs-of"></div>
@@ -176,16 +177,38 @@
           <div class="track-chart-title">Contribuição TP</div>
           <div id="track-tp"></div>
         </div>
+
+        <div class="track-chart-card">
+          <div class="track-chart-title">Você vs Aluno Médio</div>
+          <div id="track-vs-medio"></div>
+        </div>
+        <div class="track-chart-card">
+          <div class="track-chart-title">Seus professores gostam de você?</div>
+          <div id="track-profs"></div>
+        </div>
+        <div class="track-chart-card">
+          <div class="track-chart-title">Você vs Einstein na faculdade</div>
+          <div id="track-vs-einstein"></div>
+        </div>
+        <div class="track-chart-card">
+          <div class="track-chart-title">Nível de desespero</div>
+          <div id="track-desespero"></div>
+        </div>
+        <div class="track-chart-card">
+          <div class="track-chart-title">Chance de sobreviver ao período</div>
+          <div id="track-sobreviver"></div>
+        </div>
       </div><!-- /#home-tracking -->
 
       <div id="home-registro" class="home-view" hidden>
+        <div class="reg-summary" id="reg-summary"></div>
         <div class="reg-chips" id="reg-chips"></div>
         <button class="btn primary reg-tp-btn" id="btn-edit-tp-reg">Lançar TP</button>
+        <div class="reg-progress" id="reg-progress"></div>
         <h3 class="stitle">Lançamentos recentes</h3>
         <ul id="reg-recentes" class="list">
           <li class="empty">nenhum lançamento ainda</li>
         </ul>
-        <div class="reg-progress" id="reg-progress"></div>
       </div><!-- /#home-registro -->
     </div>
 
@@ -351,14 +374,14 @@
           </div>
           <div class="cfg-actions" id="sync-actions">
             <button class="cfg-action" id="btn-sync-generate" type="button">
-              <span class="cfg-action-ico">⟳</span>
+              <span class="cfg-action-ico">+</span>
               <span class="cfg-action-txt">
                 <span class="cfg-action-title">gerar código</span>
                 <span class="cfg-action-sub">cria um código novo de sync</span>
               </span>
             </button>
             <button class="cfg-action" id="btn-sync-enter" type="button">
-              <span class="cfg-action-ico">⌨</span>
+              <span class="cfg-action-ico">#</span>
               <span class="cfg-action-txt">
                 <span class="cfg-action-title">inserir código</span>
                 <span class="cfg-action-sub">conecta com código existente</span>
@@ -386,14 +409,14 @@
           <p class="cfg-text">exporte tudo (disciplinas, notas, TP, histórico) como JSON. importe pra migrar entre dispositivos.</p>
           <div class="cfg-actions">
             <button class="cfg-action" id="btn-export" type="button">
-              <span class="cfg-action-ico">↓</span>
+              <span class="cfg-action-ico">↑</span>
               <span class="cfg-action-txt">
                 <span class="cfg-action-title">exportar</span>
                 <span class="cfg-action-sub">baixa um arquivo .json</span>
               </span>
             </button>
             <button class="cfg-action" id="btn-import" type="button">
-              <span class="cfg-action-ico">↑</span>
+              <span class="cfg-action-ico">↓</span>
               <span class="cfg-action-txt">
                 <span class="cfg-action-title">importar</span>
                 <span class="cfg-action-sub">substitui estado atual</span>
