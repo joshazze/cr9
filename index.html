@@ -328,9 +328,51 @@
               <span class="cfg-stat-lbl">pts ganhos</span>
             </div>
             <div class="cfg-stat">
-              <span class="cfg-stat-num" id="cfg-stat-ver">v10</span>
+              <span class="cfg-stat-num" id="cfg-stat-ver">v11</span>
               <span class="cfg-stat-lbl">versão</span>
             </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="cfg-card" id="cfg-sync">
+        <div class="cfg-card-head">
+          <span class="cfg-card-kicker">Sincronização</span>
+          <h3 class="cfg-card-title">sync entre dispositivos</h3>
+        </div>
+        <div class="cfg-card-body">
+          <p class="cfg-text">sincronize suas notas entre iPhone e Mac. gere um código num dispositivo e insira no outro.</p>
+          <div class="sync-status" id="sync-status">
+            <span class="sync-dot"></span>
+            <span class="sync-status-text">desconectado</span>
+          </div>
+          <div class="sync-code-display" id="sync-code-display" hidden>
+            <span id="sync-code-text">—</span>
+          </div>
+          <div class="cfg-actions" id="sync-actions">
+            <button class="cfg-action" id="btn-sync-generate" type="button">
+              <span class="cfg-action-ico">⟳</span>
+              <span class="cfg-action-txt">
+                <span class="cfg-action-title">gerar código</span>
+                <span class="cfg-action-sub">cria um código novo de sync</span>
+              </span>
+            </button>
+            <button class="cfg-action" id="btn-sync-enter" type="button">
+              <span class="cfg-action-ico">⌨</span>
+              <span class="cfg-action-txt">
+                <span class="cfg-action-title">inserir código</span>
+                <span class="cfg-action-sub">conecta com código existente</span>
+              </span>
+            </button>
+          </div>
+          <div class="cfg-actions" id="sync-actions-connected" hidden>
+            <button class="cfg-action danger" id="btn-sync-disconnect" type="button">
+              <span class="cfg-action-ico">✕</span>
+              <span class="cfg-action-txt">
+                <span class="cfg-action-title">desconectar</span>
+                <span class="cfg-action-sub">para de sincronizar</span>
+              </span>
+            </button>
           </div>
         </div>
       </section>
@@ -392,6 +434,8 @@
     </div>
   </div>
 
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

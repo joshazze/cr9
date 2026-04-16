@@ -276,6 +276,114 @@ function loadState() {
 
 function saveState() {
   localStorage.setItem(KEY, JSON.stringify(state));
+  pushToFirebase();
+}
+
+// ───────── SYNC ─────────
+
+const SYNC_KEY = 'cr9-sync-code';
+const SYNC_DEBOUNCE_MS = 2000;
+const FIREBASE_CONFIG = {
+  apiKey: 'AIzaSyBlNf6ZwK5bBCycmr6QHEKf4JERuo5eiRA',
+  authDomain: 'ocr9-d9d70.firebaseapp.com',
+  databaseURL: 'https://ocr9-d9d70-default-rtdb.firebaseio.com',
+  projectId: 'ocr9-d9d70',
+  storageBucket: 'ocr9-d9d70.firebasestorage.app',
+  messagingSenderId: '996971608172',
+  appId: '1:996971608172:web:a6dd4e29e0d9a282bf8049'
+};
+
+let syncRef = null;
+let syncListener = null;
+let syncDebounceTimer = null;
+let syncIsReceiving = false;
+
+function initFirebase() {
+  if (typeof firebase === 'undefined') return false;
+  if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+  return true;
+}
+
+function generateSyncCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  const arr = crypto.getRandomValues(new Uint8Array(6));
+  for (let i = 0; i < 6; i++) code += chars[arr[i] % chars.length];
+  return code.slice(0, 3) + '-' + code.slice(3);
+}
+
+function connectSync(code) {
+  if (!initFirebase()) return;
+  disconnectSync(true);
+  const clean = code.replace('-', '').toUpperCase();
+  const display = clean.slice(0, 3) + '-' + clean.slice(3);
+  localStorage.setItem(SYNC_KEY, display);
+  syncRef = firebase.database().ref('sync/' + clean);
+  syncRef.set({ ...state, _ts: Date.now() });
+  syncListener = syncRef.on('value', (snap) => {
+    const remote = snap.val();
+    if (!remote || typeof remote !== 'object') return;
+    const localTs = Number(localStorage.getItem('cr9-sync-ts') || 0);
+    if (remote._ts && remote._ts <= localTs) return;
+    syncIsReceiving = true;
+    const cleaned = Object.assign({}, remote);
+    delete cleaned._ts;
+    state = migrateState(cleaned);
+    localStorage.setItem(KEY, JSON.stringify(state));
+    localStorage.setItem('cr9-sync-ts', String(remote._ts || Date.now()));
+    fullRerender();
+    syncIsReceiving = false;
+  });
+  renderSyncUI();
+}
+
+function disconnectSync(silent) {
+  if (syncRef && syncListener) {
+    syncRef.off('value', syncListener);
+  }
+  syncRef = null;
+  syncListener = null;
+  clearTimeout(syncDebounceTimer);
+  if (!silent) {
+    localStorage.removeItem(SYNC_KEY);
+    localStorage.removeItem('cr9-sync-ts');
+    renderSyncUI();
+  }
+}
+
+function pushToFirebase() {
+  if (!syncRef || syncIsReceiving) return;
+  clearTimeout(syncDebounceTimer);
+  syncDebounceTimer = setTimeout(() => {
+    const ts = Date.now();
+    localStorage.setItem('cr9-sync-ts', String(ts));
+    syncRef.set({ ...state, _ts: ts });
+  }, SYNC_DEBOUNCE_MS);
+}
+
+function renderSyncUI() {
+  const code = localStorage.getItem(SYNC_KEY);
+  const connected = !!code && !!syncRef;
+  const dot = document.querySelector('#sync-status .sync-dot');
+  const txt = document.querySelector('#sync-status .sync-status-text');
+  const codeDisplay = document.getElementById('sync-code-display');
+  const codeText = document.getElementById('sync-code-text');
+  const actionsOff = document.getElementById('sync-actions');
+  const actionsOn = document.getElementById('sync-actions-connected');
+  if (!dot) return;
+  dot.classList.toggle('on', connected);
+  txt.textContent = connected ? 'conectado' : 'desconectado';
+  codeDisplay.hidden = !connected;
+  if (connected) codeText.textContent = code;
+  actionsOff.hidden = connected;
+  actionsOn.hidden = !connected;
+}
+
+function fullRerender() {
+  renderHome();
+  renderConfig();
+  renderDisciplinas();
+  if (currentDiscId) renderDetalhe();
 }
 
 function pushRecente(entry) {
@@ -1053,6 +1161,7 @@ function renderConfig() {
   const ptsEl = document.getElementById('cfg-stat-pts');
   if (discEl) discEl.textContent = String(p.n);
   if (ptsEl) ptsEl.textContent = p.n === 0 ? '0' : String(Math.round(p.totalScore));
+  renderSyncUI();
 }
 
 // ───────── RENDER: DISCIPLINAS ─────────
@@ -1912,6 +2021,30 @@ document.getElementById('s-config').addEventListener('click', (e) => {
   }
 });
 
+// ───────── SYNC BINDINGS ─────────
+
+document.getElementById('btn-sync-generate').addEventListener('click', () => {
+  const code = generateSyncCode();
+  if (!confirm('Seu código de sync:\n\n' + code + '\n\nDigite esse código no outro dispositivo pra conectar. Continuar?')) return;
+  connectSync(code);
+});
+
+document.getElementById('btn-sync-enter').addEventListener('click', () => {
+  const raw = prompt('Digite o código de sync (ex: ABC-123):');
+  if (!raw) return;
+  const clean = raw.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+  if (clean.length !== 6) {
+    alert('Código inválido. Use 6 caracteres (ex: ABC-123).');
+    return;
+  }
+  connectSync(clean);
+});
+
+document.getElementById('btn-sync-disconnect').addEventListener('click', () => {
+  if (!confirm('Desconectar sync? Os dados locais continuam salvos.')) return;
+  disconnectSync();
+});
+
 // Export / Import
 document.getElementById('btn-export').addEventListener('click', () => {
   try {
@@ -1989,5 +2122,9 @@ if ('serviceWorker' in navigator) {
 }
 
 // ───────── INIT ─────────
+
+initFirebase();
+const savedSyncCode = localStorage.getItem(SYNC_KEY);
+if (savedSyncCode) connectSync(savedSyncCode);
 
 renderHome();
