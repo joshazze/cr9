@@ -1,14 +1,28 @@
-# CR9
+<p align="center">
+  <img src="icons/icon-192.png" width="80" alt="CR9 icon">
+</p>
 
-PWA pessoal para acompanhar o **Ibmec Stars** — programa de reconhecimento acadêmico do Ibmec que exige CR ≥ 9,0 em 4+ disciplinas no período.
+<h1 align="center">CR9</h1>
 
-**Live:** [joshazze.github.io/cr9](https://joshazze.github.io/cr9/)
+<p align="center">
+  PWA pessoal para acompanhar o <strong>Ibmec Stars</strong> — instalável como app no celular.
+  <br>
+  <a href="https://joshazze.github.io/cr9/"><strong>joshazze.github.io/cr9</strong></a>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/vanilla-JS-f7df1e" alt="Vanilla JS">
+  <img src="https://img.shields.io/badge/PWA-installable-5A0FC8" alt="PWA">
+  <img src="https://img.shields.io/badge/storage-localStorage-orange" alt="localStorage">
+  <img src="https://img.shields.io/badge/sync-Firebase%20RTDB-FFCA28" alt="Firebase RTDB">
+  <img src="https://img.shields.io/badge/deploy-GitHub%20Pages-181717" alt="GitHub Pages">
+</p>
 
 ---
 
 ## Sobre
 
-Não achei um app que tratasse a conta do Stars do jeito certo: AP1 + AP2 + ACs variáveis, AS como porta de saída, bônus do TP, e a pergunta real que interessa — *dá ainda pra fechar 9?*
+O Ibmec Stars exige CR ≥ 9,0 em 4+ disciplinas no período. Não achei um app que tratasse a conta do jeito certo: AP1 + AP2 + ACs variáveis, AS como porta de saída, bônus do TP, e a pergunta real que interessa — *dá ainda pra fechar 9?*
 
 Então fiz o meu. Vanilla stack, zero dependências em runtime, instalável no iOS/Android, funciona offline.
 
