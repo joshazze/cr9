@@ -1,4 +1,4 @@
-const CACHE_NAME = 'cr9-v13';
+const CACHE_NAME = 'cr9-v14';
 const PRECACHE_URLS = [
   './',
   './index.html',

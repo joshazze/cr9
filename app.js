@@ -1392,10 +1392,12 @@ function renderDetalhe() {
   }
 
   const chk = document.getElementById('chk-show-as');
-  if (chk) {
-    chk.checked = d.showAS === true;
-    chk.onchange = () => {
-      d.showAS = chk.checked;
+  const toggleRow = document.getElementById('det-as-toggle');
+  if (chk) chk.checked = d.showAS === true;
+  if (toggleRow) {
+    toggleRow.onclick = (e) => {
+      e.preventDefault();
+      d.showAS = !d.showAS;
       saveState();
       renderDetalhe();
     };
