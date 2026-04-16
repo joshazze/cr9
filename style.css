@@ -2199,7 +2199,6 @@ header::before {
   padding: 14px 16px;
   margin-bottom: 14px;
   box-shadow: var(--shadow-sm);
-  color: var(--accent);
 }
 .track-chart-title {
   font-family: var(--serif);
@@ -2230,6 +2229,7 @@ header::before {
   top: 0;
   bottom: 0;
   background: var(--accent);
+  border-radius: 999px;
 }
 .track-bar-exp {
   position: absolute;
@@ -2246,6 +2246,7 @@ header::before {
   height: auto;
   display: block;
   color: var(--accent);
+  max-height: 100px;
 }
 .track-tp-line {
   font-size: 13px;
@@ -2257,6 +2258,7 @@ header::before {
 /* ── Fun tracking charts ── */
 .track-vs { display: flex; flex-direction: column; gap: 10px; }
 .track-vs-row { display: flex; align-items: center; gap: 8px; }
+.track-vs-row .track-bar { flex: 1; }
 .track-vs-label {
   font: 500 0.75rem/1 var(--sans);
   color: var(--text-muted);
@@ -2271,17 +2273,17 @@ header::before {
   flex-shrink: 0;
 }
 .track-bar-avg {
-  height: 100%;
+  position: absolute; left: 0; top: 0; bottom: 0;
   background: var(--text-muted);
   border-radius: 999px;
 }
 .track-bar-genius {
-  height: 100%;
+  position: absolute; left: 0; top: 0; bottom: 0;
   background: var(--warning);
   border-radius: 999px;
 }
 .track-bar-desp {
-  height: 100%;
+  position: absolute; left: 0; top: 0; bottom: 0;
   background: var(--danger);
   border-radius: 999px;
 }
@@ -2316,17 +2318,20 @@ header::before {
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
-.track-desp .track-bar { width: 100%; }
-.track-sobrev { text-align: center; padding: 8px 0; }
+.track-desp .track-bar { width: 100%; margin: 0 auto; }
+.track-sobrev { padding: 8px 0; }
 .track-sobrev-num {
   font: 600 2.5rem/1 var(--serif);
   color: var(--accent);
+  text-align: center;
+  display: block;
+  margin-bottom: 12px;
 }
 .track-sobrev-pct {
   font-size: 1.2rem;
   color: var(--text-muted);
 }
-.track-sobrev .track-bar { margin: 12px 0; }
+.track-sobrev .track-bar { margin-bottom: 10px; }
 
 /* ── Registro ── */
 .reg-summary {

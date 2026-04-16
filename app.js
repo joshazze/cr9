@@ -1029,7 +1029,7 @@ function renderHomeTracking() {
         const y = h - pad - (v / maxV) * (h - pad * 2);
         return '<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="2.5"/>';
       }).join('');
-      tl.innerHTML = '<svg class="track-svg" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none">'
+      tl.innerHTML = '<svg class="track-svg" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="xMidYMid meet">'
         + '<polyline points="' + pts.join(' ') + '" fill="none" stroke="currentColor" stroke-width="1.5"/>'
         + dots
         + '</svg>';
@@ -1080,7 +1080,7 @@ function renderHomeTracking() {
       });
       const areaPts = [pad + ',' + (h - pad)].concat(pts).concat([(pad + (cum.length - 1) * stepX).toFixed(1) + ',' + (h - pad)]);
       const needY = (h - pad - (need / maxV) * (h - pad * 2)).toFixed(1);
-      pr.innerHTML = '<svg class="track-svg" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none">'
+      pr.innerHTML = '<svg class="track-svg" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="xMidYMid meet">'
         + '<polygon points="' + areaPts.join(' ') + '" fill="currentColor" fill-opacity="0.18"/>'
         + '<polyline points="' + pts.join(' ') + '" fill="none" stroke="currentColor" stroke-width="1.5"/>'
         + '<line x1="' + pad + '" y1="' + needY + '" x2="' + (w - pad) + '" y2="' + needY + '" stroke="currentColor" stroke-dasharray="3 3" stroke-opacity="0.6"/>'
