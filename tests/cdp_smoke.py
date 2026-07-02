@@ -115,6 +115,47 @@ try:
           lan and lan["slot"] == "ap2" and lan["valor"] == 30 and lan["kind"] == "oficial",
           json.dumps(lan))
 
+    # 8. gestão de períodos — fechar cria novo ativo e arquiva o atual
+    h.set_state(FIX_V2)
+    h.ev("window.prompt = (m, d) => d; window.confirm = () => true; window.alert = () => {}")
+    h.ev("fecharPeriodo()")
+    check("fechar: 2 períodos", h.ev("state.periodos.length === 2"))
+    check("fechar: novo ativo vazio e nome sugerido",
+          h.ev("per().nome === '2026.2' && per().disciplinas.length === 0"))
+    check("fechar: antigo arquivado preservado",
+          h.ev("state.periodos[0].status === 'arquivado' && state.periodos[0].disciplinas.length === 4"))
+    check("header mostra o período novo",
+          "2026.2" in (h.ev("document.getElementById('hdr-meta').textContent") or ""))
+
+    # 9. reabrir faz swap mantendo o invariante de 1 ativo
+    old_id = h.ev("state.periodos[0].id")
+    h.ev(f"handlePeriodoAction('reabrir', '{old_id}')")
+    check("reabrir: swap com 1 ativo",
+          h.ev(f"per().id === '{old_id}' && state.periodos.filter(p => p.status === 'ativo').length === 1"))
+    check("reabrir: dados intactos", h.ev("per().disciplinas.length === 4"))
+
+    # 10. resumo read-only do arquivado
+    arq_id = h.ev("state.periodos.find(p => p.status === 'arquivado').id")
+    h.ev(f"handlePeriodoAction('ver', '{arq_id}')")
+    check("resumo abre", h.ev("!document.getElementById('modal').hidden"))
+    check("resumo esconde salvar",
+          h.ev("document.getElementById('modal-save').style.display === 'none'"))
+    h.ev("document.getElementById('modal').hidden = true")
+
+    # 11. apagar arquivado (nunca o ativo)
+    h.ev(f"handlePeriodoAction('apagar', '{arq_id}')")
+    check("apagar arquivado",
+          h.ev(f"state.periodos.length === 1 && state.periodos.every(p => p.id !== '{arq_id}')"))
+    ativo_id = h.ev("per().id")
+    h.ev(f"handlePeriodoAction('apagar', '{ativo_id}')")
+    check("apagar do ativo é bloqueado", h.ev("state.periodos.length === 1"))
+
+    # 12. openModal normal restaura o botão salvar depois do modal info
+    h.ev("openModalAddDisc()")
+    check("openModal restaura salvar",
+          h.ev("document.getElementById('modal-save').style.display !== 'none'"))
+    h.ev("document.getElementById('modal').hidden = true")
+
     # console limpo no fim
     check("console sem erros", not h.console, "; ".join(h.console[:5]))
 finally:

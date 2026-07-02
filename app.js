@@ -1301,6 +1301,133 @@ function renderConfig() {
   if (discEl) discEl.textContent = String(p.n);
   if (ptsEl) ptsEl.textContent = p.n === 0 ? '0' : String(Math.round(p.totalScore));
   if (verEl) verEl.textContent = APP_VERSION;
+
+  renderPeriodosList();
+}
+
+function renderPeriodosList() {
+  const el = document.getElementById('per-list');
+  if (!el) return;
+  const ordenados = state.periodos.slice().sort((a, b) => (b.criadoEm || 0) - (a.criadoEm || 0));
+  el.innerHTML = ordenados.map(p => {
+    const ativo = p.status === 'ativo';
+    const r = calcPeriodo({}, p);
+    const meta = r.n + ' disc · ' + fmtNum(r.totalScore, 0) + ' pts'
+      + (r.aprov !== null ? ' · ' + fmtNum(r.aprov, 0) + '%' : '');
+    const acoes = ativo
+      ? '<button type="button" class="per-btn" data-per-action="renomear" data-per-id="' + p.id + '">renomear</button>'
+      : '<button type="button" class="per-btn" data-per-action="ver" data-per-id="' + p.id + '">ver</button>'
+        + '<button type="button" class="per-btn" data-per-action="renomear" data-per-id="' + p.id + '">renomear</button>'
+        + '<button type="button" class="per-btn" data-per-action="reabrir" data-per-id="' + p.id + '">reabrir</button>'
+        + '<button type="button" class="per-btn danger" data-per-action="apagar" data-per-id="' + p.id + '">apagar</button>';
+    return '<div class="per-item' + (ativo ? ' on' : '') + '">'
+      + '<div class="per-info">'
+      + '<div class="per-nome">' + escapeHTML(p.nome)
+      + ' <span class="per-pill' + (ativo ? ' on' : '') + '">' + (ativo ? 'ativo' : 'arquivado') + '</span></div>'
+      + '<div class="per-meta">' + meta + '</div>'
+      + '</div>'
+      + '<div class="per-actions">' + acoes + '</div>'
+      + '</div>';
+  }).join('');
+}
+
+function proximoPeriodoNome(nomeAtual) {
+  const m = /^(\d{4})\.([12])$/.exec(nomeAtual || '');
+  if (!m) return defaultPeriodoNome();
+  return m[2] === '1' ? m[1] + '.2' : (Number(m[1]) + 1) + '.1';
+}
+
+function fecharPeriodo() {
+  const atual = per();
+  const sugerido = proximoPeriodoNome(atual.nome);
+  const nome = prompt('Fechar "' + atual.nome + '" e abrir um novo período.\nNome do novo período:', sugerido);
+  if (nome === null) return;
+  const nomeFinal = nome.trim() || sugerido;
+  if (!confirm('Arquivar "' + atual.nome + '" (tudo fica preservado) e começar "' + nomeFinal + '"?')) return;
+  atual.status = 'arquivado';
+  atual.arquivadoEm = Date.now();
+  const novo = novoPeriodo(nomeFinal);
+  state.periodos.push(novo);
+  state.periodoAtivoId = novo.id;
+  simState = {};
+  currentDiscId = null;
+  saveState();
+  renderHeader();
+  renderConfig();
+  renderDisciplinas();
+  renderHome();
+}
+
+function resumoPeriodoHTML(p) {
+  const r = calcPeriodo({}, p);
+  if (r.n === 0) return '<p class="hint">período sem disciplinas.</p>';
+  const rows = p.disciplinas.map(d => {
+    const rd = calcDisc(d);
+    const tpB = p.tp && p.tp.applyTo === d.id && p.tp.value != null ? Math.round(p.tp.value * 10) : 0;
+    const pct = rd.dist > 0 ? (rd.earned / rd.dist) * 100 : null;
+    return '<tr><td>' + escapeHTML(d.nome) + (tpB > 0 ? ' <span class="tp-badge">+' + tpB + ' TP</span>' : '') + '</td>'
+      + '<td>' + fmtNum(rd.earned, 1) + '<span class="per-res-dim">/100</span></td>'
+      + '<td>' + (pct !== null ? fmtNum(pct, 0) + '%' : '—') + '</td></tr>';
+  }).join('');
+  const starsOk = r.enrolledOk && !r.anyAS && r.totalScore >= r.starsNeeded;
+  const starsTxt = r.anyAS ? 'fora (AS oficial)'
+    : !r.enrolledOk ? 'não elegível (menos de 4 disciplinas)'
+    : starsOk ? 'conquistado ✦' : fmtNum(r.totalScore, 0) + ' de ' + r.starsNeeded + ' pts';
+  return '<div class="per-resumo">'
+    + '<table><thead><tr><th>disciplina</th><th>pontos</th><th>aprov.</th></tr></thead>'
+    + '<tbody>' + rows + '</tbody></table>'
+    + '<div class="per-res-tot">'
+    + '<span>total <strong>' + fmtNum(r.totalScore, 0) + '</strong> pts</span>'
+    + '<span>aproveitamento <strong>' + (r.aprov !== null ? fmtNum(r.aprov, 1) + '%' : '—') + '</strong></span>'
+    + '<span>stars: <strong>' + starsTxt + '</strong></span>'
+    + '</div>'
+    + '</div>';
+}
+
+function handlePeriodoAction(action, perId) {
+  const p = state.periodos.find(x => x.id === perId);
+  if (!p) return;
+
+  if (action === 'ver') {
+    openModalInfo(p.nome + ' · resumo', resumoPeriodoHTML(p));
+    return;
+  }
+  if (action === 'renomear') {
+    const nome = prompt('Novo nome do período:', p.nome);
+    if (nome === null || !nome.trim()) return;
+    p.nome = nome.trim();
+    saveState();
+    renderConfig();
+    renderHeader();
+    return;
+  }
+  if (action === 'reabrir') {
+    if (p.status === 'ativo') return;
+    const atual = per();
+    if (!confirm('Reabrir "' + p.nome + '"? O período atual ("' + atual.nome + '") será arquivado no lugar — nada se perde.')) return;
+    atual.status = 'arquivado';
+    atual.arquivadoEm = Date.now();
+    p.status = 'ativo';
+    p.arquivadoEm = null;
+    state.periodoAtivoId = p.id;
+    simState = {};
+    currentDiscId = null;
+    saveState();
+    renderHeader();
+    renderConfig();
+    renderDisciplinas();
+    renderHome();
+    return;
+  }
+  if (action === 'apagar') {
+    if (p.status === 'ativo') return;
+    if (!confirm('Apagar o período arquivado "' + p.nome + '" com todas as notas dele? (1/2)')) return;
+    if (!confirm('Irreversível. Confirmar exclusão de "' + p.nome + '"? (2/2)')) return;
+    state.periodos = state.periodos.filter(x => x.id !== perId);
+    saveState();
+    renderConfig();
+    return;
+  }
 }
 
 // ───────── RENDER: DISCIPLINAS ─────────
@@ -1718,9 +1845,19 @@ function openModal(title, bodyHTML, onSave) {
   const oldSave = document.getElementById('modal-save');
   const newSave = oldSave.cloneNode(true);
   oldSave.parentNode.replaceChild(newSave, oldSave);
+  newSave.style.display = '';
   newSave.addEventListener('click', () => {
     if (onSave()) modal.hidden = true;
   });
+}
+
+// Variante somente-leitura do modal (sem botão salvar) — resumos e consultas.
+function openModalInfo(title, bodyHTML) {
+  const modal = document.getElementById('modal');
+  document.getElementById('modal-title').textContent = title;
+  document.getElementById('modal-body').innerHTML = bodyHTML;
+  document.getElementById('modal-save').style.display = 'none';
+  modal.hidden = false;
 }
 
 // Fechar modal: bind único (elementos estáticos; rebind por abertura vazava listeners)
@@ -2170,6 +2307,15 @@ document.getElementById('s-config').addEventListener('click', (e) => {
     saveState();
     renderConfig();
     renderHome();
+    return;
+  }
+  const perBtn = e.target.closest('[data-per-action]');
+  if (perBtn) {
+    handlePeriodoAction(perBtn.dataset.perAction, perBtn.dataset.perId);
+    return;
+  }
+  if (e.target.closest('#btn-per-fechar')) {
+    fecharPeriodo();
     return;
   }
 });
