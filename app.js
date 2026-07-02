@@ -239,22 +239,129 @@ function getSaudacao(gender) {
   return raw.charAt(0).toUpperCase() + raw.slice(1);
 }
 
+// ───────── PERÍODOS (schema v3) ─────────
+
+function defaultPeriodoNome(ts) {
+  const d = ts ? new Date(ts) : new Date();
+  return d.getFullYear() + '.' + (d.getMonth() < 6 ? 1 : 2);
+}
+
+function novoPeriodo(nome) {
+  return {
+    id: 'per-' + uid(),
+    nome: nome || defaultPeriodoNome(),
+    status: 'ativo',
+    criadoEm: Date.now(),
+    arquivadoEm: null,
+    disciplinas: [],
+    tp: { value: null, expectativa: false, applyTo: null },
+    recentes: [],
+    lancamentos: []
+  };
+}
+
+// Backfill best-effort da série temporal a partir dos recentes v2 (máx 12).
+function seedLancamentosFromRecentes(recentes) {
+  if (!Array.isArray(recentes)) return [];
+  return recentes.slice().reverse()
+    .filter(r => r && typeof r.valor === 'number')
+    .map(r => ({
+      ts: r.ts || Date.now(),
+      discId: r.discId || null,
+      slot: r.tipo === 'ac' ? 'ac:' + (r.acId || r.label || '') : (r.tipo || 'ap1'),
+      valor: r.valor,
+      max: typeof r.max === 'number' ? r.max : null,
+      kind: r.kind === 'expectativa' ? 'expectativa' : 'oficial',
+      seeded: true
+    }));
+}
+
 function migrateState(s) {
   if (!s || typeof s !== 'object') return s;
-  if (!Array.isArray(s.disciplinas)) s.disciplinas = [];
-  if (!s.tp || typeof s.tp !== 'object') s.tp = { value: null, expectativa: false, applyTo: null };
-  if (!Array.isArray(s.recentes)) s.recentes = [];
+
+  if (!Array.isArray(s.periodos)) {
+    // v1/v2 → v3: o estado atual vira o primeiro período, arrays POR REFERÊNCIA
+    // (nenhuma disciplina/nota é reconstruída — perda zero).
+    const recentes = Array.isArray(s.recentes) ? s.recentes : [];
+    const tsAntigo = recentes.length ? recentes[recentes.length - 1].ts : null;
+    const p = {
+      id: 'per-' + uid(),
+      nome: defaultPeriodoNome(tsAntigo),
+      status: 'ativo',
+      criadoEm: tsAntigo || Date.now(),
+      arquivadoEm: null,
+      disciplinas: Array.isArray(s.disciplinas) ? s.disciplinas : [],
+      tp: (s.tp && typeof s.tp === 'object') ? s.tp : { value: null, expectativa: false, applyTo: null },
+      recentes,
+      lancamentos: seedLancamentosFromRecentes(recentes)
+    };
+    s = {
+      v: 3,
+      gender: s.gender !== undefined ? s.gender : null,
+      foco: s.foco !== undefined ? s.foco : null,
+      periodoAtivoId: p.id,
+      periodos: [p]
+    };
+  }
+
+  // sombras do shape antigo não coexistem com o v3
+  delete s.disciplinas; delete s.tp; delete s.recentes; delete s.lancamentos;
+
   if (s.gender === undefined) s.gender = null;
   if (s.foco === undefined) s.foco = null;
-  s.disciplinas.forEach(d => {
-    if (d.showAS === undefined) d.showAS = false;
-    if (d.asAutoTriggered === undefined) d.asAutoTriggered = false;
-    if (!d.acs) d.acs = [];
+
+  s.periodos = s.periodos.filter(p => p && typeof p === 'object');
+  s.periodos.forEach(p => {
+    if (!p.id) p.id = 'per-' + uid();
+    if (typeof p.nome !== 'string' || !p.nome) p.nome = defaultPeriodoNome(p.criadoEm);
+    if (!p.criadoEm) p.criadoEm = Date.now();
+    if (p.arquivadoEm === undefined) p.arquivadoEm = null;
+    if (!Array.isArray(p.disciplinas)) p.disciplinas = [];
+    if (!p.tp || typeof p.tp !== 'object') p.tp = { value: null, expectativa: false, applyTo: null };
+    if (!Array.isArray(p.recentes)) p.recentes = [];
+    if (!Array.isArray(p.lancamentos)) p.lancamentos = [];
+
+    // Saneamento campo a campo por disciplina: import/JSON malformado não pode
+    // persistir um estado que crashe o render (era o bug que bricava o app).
+    p.disciplinas = p.disciplinas.filter(d => d && typeof d === 'object');
+    p.disciplinas.forEach(d => {
+      if (!d.id) d.id = uid();
+      if (typeof d.nome !== 'string' || !d.nome) d.nome = 'sem nome';
+      ['ap1', 'ap2'].forEach(k => {
+        if (!d[k] || typeof d[k] !== 'object') d[k] = { value: null, expectativa: false };
+        if (d[k].value === undefined || (d[k].value !== null && typeof d[k].value !== 'number')) d[k].value = null;
+      });
+      if (!d.as || typeof d.as !== 'object') d.as = { value: null, expectativa: false, taken: false };
+      if (d.as.value === undefined || (d.as.value !== null && typeof d.as.value !== 'number')) d.as.value = null;
+      if (d.as.taken === undefined) d.as.taken = false;
+      if (d.acMode !== 'equal' && d.acMode !== 'custom') d.acMode = 'custom';
+      if (!Array.isArray(d.acs)) d.acs = [];
+      d.acs = d.acs.filter(ac => ac && typeof ac === 'object');
+      d.acs.forEach(ac => { if (!ac.id) ac.id = uid(); });
+      if (d.showAS === undefined) d.showAS = false;
+      if (d.asAutoTriggered === undefined) d.asAutoTriggered = false;
+    });
+
+    const discIds = new Set(p.disciplinas.map(d => d.id));
+    if (p.tp.applyTo && !discIds.has(p.tp.applyTo)) p.tp.applyTo = null;
+    p.recentes = p.recentes.filter(r => r && (r.discId == null || discIds.has(r.discId)));
+    // lancamentos é log histórico: não filtra por disciplina viva (o leitor filtra).
   });
-  const discIds = new Set(s.disciplinas.map(d => d.id));
-  if (s.tp.applyTo && !discIds.has(s.tp.applyTo)) s.tp.applyTo = null;
-  s.recentes = s.recentes.filter(r => r && (r.discId == null || discIds.has(r.discId)));
-  s.v = 2;
+
+  if (s.periodos.length === 0) s.periodos.push(novoPeriodo());
+
+  // Invariante: exatamente UM período ativo, coerente com periodoAtivoId.
+  const ativo = s.periodos.find(p => p.id === s.periodoAtivoId && p.status === 'ativo')
+    || s.periodos.find(p => p.status === 'ativo')
+    || s.periodos[s.periodos.length - 1];
+  s.periodos.forEach(p => {
+    p.status = (p === ativo) ? 'ativo' : 'arquivado';
+    if (p.status === 'arquivado' && !p.arquivadoEm) p.arquivadoEm = Date.now();
+  });
+  if (ativo.status === 'ativo') ativo.arquivadoEm = null;
+  s.periodoAtivoId = ativo.id;
+
+  s.v = 3;
   return s;
 }
 
@@ -263,17 +370,16 @@ function loadState() {
     const raw = localStorage.getItem(KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === 'object') return migrateState(parsed);
+      if (parsed && typeof parsed === 'object') {
+        // Seguro de vida one-time: guarda o raw pré-v3 antes da primeira migração.
+        if (!Array.isArray(parsed.periodos) && !localStorage.getItem('cr9-v2-backup')) {
+          try { localStorage.setItem('cr9-v2-backup', raw); } catch (e) {}
+        }
+        return migrateState(parsed);
+      }
     }
   } catch (e) {}
-  return migrateState({
-    v: 2,
-    disciplinas: [],
-    tp: { value: null, expectativa: false, applyTo: null },
-    recentes: [],
-    gender: null,
-    foco: null
-  });
+  return migrateState({ v: 3, gender: null, foco: null, periodoAtivoId: null, periodos: [] });
 }
 
 function saveState() {
@@ -284,12 +390,42 @@ function saveState() {
   }
 }
 
+// Período ativo — todo o app lê/escreve os dados correntes através daqui.
+function per() {
+  let p = state.periodos.find(x => x.id === state.periodoAtivoId);
+  if (!p) {
+    p = state.periodos[state.periodos.length - 1];
+    state.periodoAtivoId = p.id;
+  }
+  return p;
+}
+
+const MAX_LANCAMENTOS = 500;
+
+// Série temporal append-only do período (fonte de tendência/forma/progressão).
+function pushLancamento(entry) {
+  const p = per();
+  p.lancamentos.push({
+    ts: Date.now(),
+    discId: entry.discId || null,
+    slot: entry.tipo === 'ac' ? 'ac:' + (entry.acId || entry.label || '') : entry.tipo,
+    valor: entry.valor,
+    max: typeof entry.max === 'number' ? entry.max : null,
+    kind: entry.kind === 'expectativa' ? 'expectativa' : 'oficial'
+  });
+  if (p.lancamentos.length > MAX_LANCAMENTOS) {
+    p.lancamentos.splice(0, p.lancamentos.length - MAX_LANCAMENTOS);
+  }
+}
+
 function pushRecente(entry) {
-  state.recentes.unshift({ ts: Date.now(), ...entry });
-  if (state.recentes.length > MAX_RECENTES) state.recentes.length = MAX_RECENTES;
+  per().recentes.unshift({ ts: Date.now(), ...entry });
+  if (per().recentes.length > MAX_RECENTES) per().recentes.length = MAX_RECENTES;
+  pushLancamento(entry);
 }
 
 let state = loadState();
+saveState(); // persiste a migração de schema já no boot (backup v2 fica em cr9-v2-backup)
 let simState = {};
 let currentDiscId = null;
 
@@ -366,13 +502,13 @@ function calcDisc(d, ov = {}) {
   };
 }
 
-function calcPeriodo(sim = {}) {
-  const n = state.disciplinas.length;
+function calcPeriodo(sim = {}, periodo = per()) {
+  const n = periodo.disciplinas.length;
   const total = n * 100;
   const starsNeeded = n * 90;
   let earnedReg = 0, distReg = 0, anyAS = false;
 
-  state.disciplinas.forEach(d => {
+  periodo.disciplinas.forEach(d => {
     const simD = (sim.disc && sim.disc[d.id]) || {};
     const r = calcDisc(d, simD);
     earnedReg += r.earned;
@@ -380,7 +516,7 @@ function calcPeriodo(sim = {}) {
     if (r.hasAS) anyAS = true;
   });
 
-  const tp = sim.tp !== undefined ? sim.tp : state.tp;
+  const tp = sim.tp !== undefined ? sim.tp : periodo.tp;
   let tpBonus = 0;
   if (tp && tp.value !== null && tp.value !== undefined && tp.applyTo) {
     tpBonus = Math.round(tp.value * 10);
@@ -457,11 +593,11 @@ function calcStarsProbability(p) {
 
 function renderSegBar() {
   const el = document.getElementById('seg-dist');
-  if (state.disciplinas.length === 0) {
+  if (per().disciplinas.length === 0) {
     el.innerHTML = '<div class="seg-bar-empty">crie disciplinas pra ver o progresso</div>';
     return;
   }
-  el.innerHTML = state.disciplinas.map(d => {
+  el.innerHTML = per().disciplinas.map(d => {
     const r = calcDisc(d);
     const tpB = tpBonusForDisc(d.id);
     const distW = Math.max(0, Math.min(100, r.dist + tpB));
@@ -626,8 +762,8 @@ function discStatus(d) {
 }
 
 function tpBonusForDisc(discId) {
-  if (!state.tp || state.tp.value == null || state.tp.applyTo !== discId) return 0;
-  return Math.round(state.tp.value * 10);
+  if (!per().tp || per().tp.value == null || per().tp.applyTo !== discId) return 0;
+  return Math.round(per().tp.value * 10);
 }
 
 function calcDiscOficialOnly(d) {
@@ -786,14 +922,14 @@ function renderHomeStars() {
   // TP card
   const tpBonusEl = document.getElementById('tp-bonus');
   const tpHintEl = document.getElementById('tp-hint');
-  if (state.tp.value !== null && state.tp.value !== undefined) {
-    const bonus = Math.round(state.tp.value * 10);
-    const expBadge = state.tp.expectativa ? ' <span class="badge-exp">prev</span>' : '';
+  if (per().tp.value !== null && per().tp.value !== undefined) {
+    const bonus = Math.round(per().tp.value * 10);
+    const expBadge = per().tp.expectativa ? ' <span class="badge-exp">prev</span>' : '';
     tpBonusEl.innerHTML = bonus + ' pts' + expBadge;
-    const disc = state.disciplinas.find(d => d.id === state.tp.applyTo);
+    const disc = per().disciplinas.find(d => d.id === per().tp.applyTo);
     tpHintEl.innerHTML = disc
-      ? 'nota ' + fmtNum(state.tp.value, 3) + ' → aplicado em <strong>' + escapeHTML(disc.nome) + '</strong>'
-      : 'nota ' + fmtNum(state.tp.value, 3) + ' — <strong>sem disciplina selecionada</strong>';
+      ? 'nota ' + fmtNum(per().tp.value, 3) + ' → aplicado em <strong>' + escapeHTML(disc.nome) + '</strong>'
+      : 'nota ' + fmtNum(per().tp.value, 3) + ' — <strong>sem disciplina selecionada</strong>';
   } else {
     tpBonusEl.textContent = '— pts';
     tpHintEl.textContent = 'sem nota lançada';
@@ -801,10 +937,10 @@ function renderHomeStars() {
 
   // Breakdown por disciplina
   const bdBody = document.getElementById('bd-body');
-  if (state.disciplinas.length === 0) {
+  if (per().disciplinas.length === 0) {
     bdBody.innerHTML = '<p class="hint">crie disciplinas pra ver o detalhamento</p>';
   } else {
-    bdBody.innerHTML = state.disciplinas.map(d => {
+    bdBody.innerHTML = per().disciplinas.map(d => {
       const r = calcDisc(d);
       const tpB = tpBonusForDisc(d.id);
       const earnedW = Math.max(0, Math.min(100, r.earned + tpB));
@@ -825,10 +961,10 @@ function renderHomeStars() {
 
   // Recentes
   const lista = document.getElementById('lista-recentes');
-  if (!state.recentes || state.recentes.length === 0) {
+  if (!per().recentes || per().recentes.length === 0) {
     lista.innerHTML = '<li class="empty">nenhum lançamento ainda</li>';
   } else {
-    lista.innerHTML = state.recentes.map(r => {
+    lista.innerHTML = per().recentes.map(r => {
       const exp = r.kind === 'expectativa';
       const badge = exp ? '<span class="badge-exp">prev</span>' : '';
       const maxStr = r.max ? '<span class="rec-val-max"> / ' + fmtNum(r.max, 1) + '</span>' : '';
@@ -862,10 +998,10 @@ function renderHomeTracking() {
   // Expectativa vs Oficial
   const evo = document.getElementById('track-exp-vs-of');
   if (evo) {
-    if (state.disciplinas.length === 0) {
+    if (per().disciplinas.length === 0) {
       evo.innerHTML = '<p class="hint">crie disciplinas pra ver</p>';
     } else {
-      evo.innerHTML = state.disciplinas.map(d => {
+      evo.innerHTML = per().disciplinas.map(d => {
         const all = calcDisc(d);
         const of = calcDiscOficialOnly(d);
         const expExtra = Math.max(0, all.earned - of.earned);
@@ -882,7 +1018,7 @@ function renderHomeTracking() {
   // Timeline SVG sparkline
   const tl = document.getElementById('track-timeline');
   if (tl) {
-    const recs = (state.recentes || []).slice().reverse();
+    const recs = (per().recentes || []).slice().reverse();
     if (recs.length === 0) {
       tl.innerHTML = '<p class="hint">sem lançamentos pra plotar</p>';
     } else {
@@ -912,10 +1048,10 @@ function renderHomeTracking() {
   // Aproveitamento per disciplina
   const apr = document.getElementById('track-aprov-list');
   if (apr) {
-    if (state.disciplinas.length === 0) {
+    if (per().disciplinas.length === 0) {
       apr.innerHTML = '<p class="hint">crie disciplinas pra ver</p>';
     } else {
-      const items = state.disciplinas.map(d => {
+      const items = per().disciplinas.map(d => {
         const r = calcDisc(d);
         const tpB = tpBonusForDisc(d.id);
         const e = r.earned + tpB;
@@ -935,7 +1071,7 @@ function renderHomeTracking() {
   // Progressão SVG
   const pr = document.getElementById('track-progress');
   if (pr) {
-    const recs = (state.recentes || []).slice().reverse();
+    const recs = (per().recentes || []).slice().reverse();
     if (recs.length === 0) {
       pr.innerHTML = '<p class="hint">sem dados de progressão</p>';
     } else {
@@ -965,13 +1101,13 @@ function renderHomeTracking() {
   // TP contribution
   const tpEl = document.getElementById('track-tp');
   if (tpEl) {
-    if (!state.tp || state.tp.value == null) {
+    if (!per().tp || per().tp.value == null) {
       tpEl.innerHTML = '<p class="hint">sem nota TP lançada</p>';
     } else {
-      const bonus = Math.round(state.tp.value * 10);
-      const disc = state.disciplinas.find(x => x.id === state.tp.applyTo);
+      const bonus = Math.round(per().tp.value * 10);
+      const disc = per().disciplinas.find(x => x.id === per().tp.applyTo);
       tpEl.innerHTML = '<div class="track-tp-line"><strong>+' + bonus + ' pts</strong> em ' + (disc ? escapeHTML(disc.nome) : '<em>sem disciplina</em>') + '</div>'
-        + '<div class="track-tp-line muted">nota bruta ' + fmtNum(state.tp.value, 3) + '</div>';
+        + '<div class="track-tp-line muted">nota bruta ' + fmtNum(per().tp.value, 3) + '</div>';
     }
   }
 
@@ -994,10 +1130,10 @@ function renderHomeTracking() {
   // Seus professores gostam de você?
   const profs = document.getElementById('track-profs');
   if (profs) {
-    if (state.disciplinas.length === 0) {
+    if (per().disciplinas.length === 0) {
       profs.innerHTML = '<p class="hint">crie disciplinas pra descobrir</p>';
     } else {
-      profs.innerHTML = state.disciplinas.map(d => {
+      profs.innerHTML = per().disciplinas.map(d => {
         const r = calcDisc(d);
         const tpB = tpBonusForDisc(d.id);
         const score = r.dist > 0 ? (r.earned + tpB) / (r.dist + tpB) * 100 : 0;
@@ -1088,10 +1224,10 @@ function renderHomeRegistro() {
   // Chips
   const chips = document.getElementById('reg-chips');
   if (chips) {
-    if (state.disciplinas.length === 0) {
+    if (per().disciplinas.length === 0) {
       chips.innerHTML = '<p class="hint">crie disciplinas primeiro</p>';
     } else {
-      chips.innerHTML = state.disciplinas.map(d =>
+      chips.innerHTML = per().disciplinas.map(d =>
         '<button class="reg-chip" data-disc="' + d.id + '">' + escapeHTML(d.nome) + '</button>'
       ).join('');
       chips.querySelectorAll('.reg-chip').forEach(el => {
@@ -1103,10 +1239,10 @@ function renderHomeRegistro() {
   // Recentes
   const lista = document.getElementById('reg-recentes');
   if (lista) {
-    if (!state.recentes || state.recentes.length === 0) {
+    if (!per().recentes || per().recentes.length === 0) {
       lista.innerHTML = '<li class="empty">nenhum lançamento ainda</li>';
     } else {
-      lista.innerHTML = state.recentes.map(r => {
+      lista.innerHTML = per().recentes.map(r => {
         const exp = r.kind === 'expectativa';
         const badge = exp ? '<span class="badge-exp">prev</span>' : '';
         const maxStr = r.max ? '<span class="rec-val-max"> / ' + fmtNum(r.max, 1) + '</span>' : '';
@@ -1124,10 +1260,10 @@ function renderHomeRegistro() {
   // Slim progress per disciplina
   const prog = document.getElementById('reg-progress');
   if (prog) {
-    if (state.disciplinas.length === 0) {
+    if (per().disciplinas.length === 0) {
       prog.innerHTML = '';
     } else {
-      prog.innerHTML = state.disciplinas.map(d => {
+      prog.innerHTML = per().disciplinas.map(d => {
         const r = calcDisc(d);
         const tpB = tpBonusForDisc(d.id);
         const e = r.earned + tpB;
@@ -1171,11 +1307,11 @@ function renderConfig() {
 
 function renderDisciplinas() {
   const lista = document.getElementById('lista-disciplinas');
-  if (state.disciplinas.length === 0) {
+  if (per().disciplinas.length === 0) {
     lista.innerHTML = '<li class="empty">nenhuma disciplina. toca em <strong>+ nova</strong>.</li>';
     return;
   }
-  lista.innerHTML = state.disciplinas.map(d => {
+  lista.innerHTML = per().disciplinas.map(d => {
     const r = calcDisc(d);
     const tpB = tpBonusForDisc(d.id);
     const status = discStatus(d);
@@ -1225,7 +1361,7 @@ function gradeActions(tipo) {
 }
 
 function renderDetalhe() {
-  const d = state.disciplinas.find(x => x.id === currentDiscId);
+  const d = per().disciplinas.find(x => x.id === currentDiscId);
   if (!d) { goto('s-disciplinas'); return; }
 
   const tpB = tpBonusForDisc(d.id);
@@ -1383,13 +1519,13 @@ function renderDetalhe() {
 
 function renderSimulador() {
   const body = document.getElementById('sim-body');
-  if (state.disciplinas.length === 0) {
+  if (per().disciplinas.length === 0) {
     body.innerHTML = '<p class="hint">crie disciplinas primeiro.</p>';
     updateSimResult();
     return;
   }
 
-  body.innerHTML = state.disciplinas.map(d => renderSimDisc(d)).join('');
+  body.innerHTML = per().disciplinas.map(d => renderSimDisc(d)).join('');
 
   const ensureSim = (discId) => {
     if (!simState.disc) simState.disc = {};
@@ -1399,7 +1535,7 @@ function renderSimulador() {
   };
 
   const refreshDiscScore = (discId) => {
-    const d = state.disciplinas.find(x => x.id === discId);
+    const d = per().disciplinas.find(x => x.id === discId);
     if (!d) return;
     const simD = simState.disc[discId] || {};
     const r = calcDisc(d, simD);
@@ -1601,7 +1737,7 @@ function openModalAddDisc() {
     () => {
       const nome = document.getElementById('m-nome').value.trim();
       if (!nome) { alert('Nome obrigatório'); return false; }
-      state.disciplinas.push({
+      per().disciplinas.push({
         id: uid(),
         nome,
         ap1: { value: null, expectativa: false },
@@ -1620,7 +1756,7 @@ function openModalAddDisc() {
 }
 
 function openModalGrade(tipo, isExpectativa) {
-  const d = state.disciplinas.find(x => x.id === currentDiscId);
+  const d = per().disciplinas.find(x => x.id === currentDiscId);
   if (!d) return;
   const slot = d[tipo];
   const max = 40;
@@ -1677,7 +1813,7 @@ function openModalGrade(tipo, isExpectativa) {
 }
 
 function setAcMode(mode) {
-  const d = state.disciplinas.find(x => x.id === currentDiscId);
+  const d = per().disciplinas.find(x => x.id === currentDiscId);
   if (!d) return;
   const current = d.acMode || 'custom';
   if (current === mode) return;
@@ -1699,7 +1835,7 @@ function setAcMode(mode) {
 }
 
 function openModalAcGrade(acId) {
-  const d = state.disciplinas.find(x => x.id === currentDiscId);
+  const d = per().disciplinas.find(x => x.id === currentDiscId);
   if (!d) return;
   const ac = d.acs.find(a => a.id === acId);
   if (!ac) return;
@@ -1728,6 +1864,7 @@ function openModalAcGrade(acId) {
           discId: d.id,
           discNome: d.nome,
           tipo: 'ac',
+          acId: ac.id,
           label: 'AC · ' + ac.nome,
           valor: ac.delivered ? share : 0,
           max: share,
@@ -1782,6 +1919,7 @@ function openModalAcGrade(acId) {
         discId: d.id,
         discNome: d.nome,
         tipo: 'ac',
+        acId: ac.id,
         label: 'AC · ' + ac.nome,
         valor: v,
         max: ac.valor,
@@ -1811,7 +1949,7 @@ function openModalAcGrade(acId) {
 }
 
 function openModalAddAc() {
-  const d = state.disciplinas.find(x => x.id === currentDiscId);
+  const d = per().disciplinas.find(x => x.id === currentDiscId);
   if (!d) return;
   const mode = d.acMode || 'custom';
 
@@ -1869,22 +2007,22 @@ function openModalTP() {
   openModal(
     'teste de progresso',
     '<label>nota bruta (0 a 1)'
-    + '<input type="number" id="m-grade" step="0.001" min="0" max="1" value="' + (state.tp.value !== null && state.tp.value !== undefined ? state.tp.value : '') + '" placeholder="ex: 0.698" autofocus>'
+    + '<input type="number" id="m-grade" step="0.001" min="0" max="1" value="' + (per().tp.value !== null && per().tp.value !== undefined ? per().tp.value : '') + '" placeholder="ex: 0.698" autofocus>'
     + '</label>'
     + '<p class="form-hint">bônus = round(nota × 10) pontos, aplicado numa disciplina.</p>'
     + '<label>disciplina alvo'
     + '<select id="m-disc">'
     + '<option value="">— nenhuma —</option>'
-    + state.disciplinas.map(d =>
-        '<option value="' + d.id + '" ' + (state.tp.applyTo === d.id ? 'selected' : '') + '>' + escapeHTML(d.nome) + '</option>'
+    + per().disciplinas.map(d =>
+        '<option value="' + d.id + '" ' + (per().tp.applyTo === d.id ? 'selected' : '') + '>' + escapeHTML(d.nome) + '</option>'
       ).join('')
     + '</select>'
     + '</label>'
     + '<div class="radio-group" id="m-kind">'
-    + '<label class="' + (!state.tp.expectativa ? 'selected' : '') + '"><input type="radio" name="kind" value="oficial" ' + (!state.tp.expectativa ? 'checked' : '') + '>oficial</label>'
-    + '<label class="' + (state.tp.expectativa ? 'selected' : '') + '"><input type="radio" name="kind" value="expectativa" ' + (state.tp.expectativa ? 'checked' : '') + '>previsão</label>'
+    + '<label class="' + (!per().tp.expectativa ? 'selected' : '') + '"><input type="radio" name="kind" value="oficial" ' + (!per().tp.expectativa ? 'checked' : '') + '>oficial</label>'
+    + '<label class="' + (per().tp.expectativa ? 'selected' : '') + '"><input type="radio" name="kind" value="expectativa" ' + (per().tp.expectativa ? 'checked' : '') + '>previsão</label>'
     + '</div>'
-    + ((state.tp.value !== null && state.tp.value !== undefined) ? '<button type="button" class="btn sm danger" id="m-clear">limpar TP</button>' : ''),
+    + ((per().tp.value !== null && per().tp.value !== undefined) ? '<button type="button" class="btn sm danger" id="m-clear">limpar TP</button>' : ''),
     () => {
       const raw = document.getElementById('m-grade').value;
       if (raw === '') { alert('Nota obrigatória'); return false; }
@@ -1893,10 +2031,10 @@ function openModalTP() {
       const applyTo = document.getElementById('m-disc').value || null;
       const checked = document.querySelector('input[name="kind"]:checked');
       const kind = checked ? checked.value : 'oficial';
-      state.tp.value = v;
-      state.tp.applyTo = applyTo;
-      state.tp.expectativa = kind === 'expectativa';
-      const disc = state.disciplinas.find(d => d.id === applyTo);
+      per().tp.value = v;
+      per().tp.applyTo = applyTo;
+      per().tp.expectativa = kind === 'expectativa';
+      const disc = per().disciplinas.find(d => d.id === applyTo);
       pushRecente({
         discId: applyTo,
         discNome: disc ? disc.nome : '—',
@@ -1921,7 +2059,7 @@ function openModalTP() {
 
   const clearEl = document.getElementById('m-clear');
   if (clearEl) clearEl.addEventListener('click', () => {
-    state.tp = { value: null, expectativa: false, applyTo: null };
+    per().tp = { value: null, expectativa: false, applyTo: null };
     saveState();
     document.getElementById('modal').hidden = true;
     renderHome();
@@ -1937,17 +2075,14 @@ document.querySelectorAll('[data-goto]').forEach(el => {
 document.getElementById('btn-add-disc').addEventListener('click', openModalAddDisc);
 
 document.getElementById('btn-reset-periodo').addEventListener('click', () => {
-  if (!confirm('Resetar o período? Isso apaga TODAS as disciplinas, notas, TP e histórico. (1/3)')) return;
+  if (!confirm('Apagar os dados do período atual (' + per().nome + ')? Disciplinas, notas, TP e histórico DESTE período somem. Períodos arquivados não são afetados. (1/3)')) return;
   if (!confirm('Tem certeza? Esta ação é irreversível — nada pode ser recuperado. (2/3)')) return;
-  if (!confirm('Última chance. Confirmar apagar tudo? (3/3)')) return;
-  state = migrateState({
-    v: 2,
-    disciplinas: [],
-    tp: { value: null, expectativa: false, applyTo: null },
-    recentes: [],
-    gender: state.gender,
-    foco: state.foco
-  });
+  if (!confirm('Última chance. Confirmar apagar tudo deste período? (3/3)')) return;
+  const p = per();
+  p.disciplinas = [];
+  p.tp = { value: null, expectativa: false, applyTo: null };
+  p.recentes = [];
+  p.lancamentos = [];
   saveState();
   simState = {};
   currentDiscId = null;
@@ -1959,12 +2094,12 @@ document.getElementById('btn-edit-tp').addEventListener('click', openModalTP);
 document.getElementById('btn-add-ac').addEventListener('click', openModalAddAc);
 
 document.getElementById('btn-del-disc').addEventListener('click', () => {
-  const d = state.disciplinas.find(x => x.id === currentDiscId);
+  const d = per().disciplinas.find(x => x.id === currentDiscId);
   if (!d) return;
   if (confirm('Excluir "' + d.nome + '" e todas as suas notas?')) {
-    state.disciplinas = state.disciplinas.filter(x => x.id !== currentDiscId);
-    if (state.tp.applyTo === currentDiscId) state.tp.applyTo = null;
-    state.recentes = state.recentes.filter(r => r.discId !== currentDiscId);
+    per().disciplinas = per().disciplinas.filter(x => x.id !== currentDiscId);
+    if (per().tp.applyTo === currentDiscId) per().tp.applyTo = null;
+    per().recentes = per().recentes.filter(r => r.discId !== currentDiscId);
     if (simState.disc) delete simState.disc[currentDiscId];
     currentDiscId = null;
     saveState();
@@ -1979,7 +2114,7 @@ document.getElementById('btn-reset-sim').addEventListener('click', () => {
 
 document.getElementById('btn-fill-max-sim').addEventListener('click', () => {
   simState = { disc: {} };
-  state.disciplinas.forEach(d => {
+  per().disciplinas.forEach(d => {
     const o = { acs: {} };
     if (d.ap1.value === null || d.ap1.value === undefined) o.ap1 = 40;
     if (d.ap2.value === null || d.ap2.value === undefined) o.ap2 = 40;
@@ -2003,10 +2138,17 @@ document.getElementById('btn-fill-max-sim').addEventListener('click', () => {
   renderSimulador();
 });
 
-// Header saudação + meta date
-document.getElementById('hdr-tagline').textContent = getSaudacao(state.gender);
-document.getElementById('hdr-meta').textContent =
-  new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' });
+// Header: saudação + período ativo + data
+function renderHeader() {
+  const tagEl = document.getElementById('hdr-tagline');
+  if (tagEl) tagEl.textContent = getSaudacao(state.gender);
+  const metaEl = document.getElementById('hdr-meta');
+  if (metaEl) {
+    const dataStr = new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' });
+    metaEl.textContent = per().nome + ' · ' + dataStr;
+  }
+}
+renderHeader();
 
 // ───────── CONFIG BINDINGS ─────────
 // Event delegation on #s-config: more robust than per-button bindings
@@ -2061,10 +2203,11 @@ document.getElementById('btn-import').addEventListener('click', () => {
     reader.onload = () => {
       try {
         const parsed = JSON.parse(reader.result);
-        if (!parsed || typeof parsed !== 'object'
-            || !Array.isArray(parsed.disciplinas)
-            || !parsed.tp || typeof parsed.tp !== 'object') {
-          alert('Arquivo inválido: faltam disciplinas ou tp.');
+        const looksV3 = parsed && Array.isArray(parsed.periodos);
+        const looksV2 = parsed && Array.isArray(parsed.disciplinas)
+          && parsed.tp && typeof parsed.tp === 'object';
+        if (!parsed || typeof parsed !== 'object' || (!looksV3 && !looksV2)) {
+          alert('Arquivo inválido: não parece um backup do CR9.');
           return;
         }
         if (!confirm('Substituir o estado atual pelo conteúdo do arquivo? Esta ação não pode ser desfeita.')) return;
