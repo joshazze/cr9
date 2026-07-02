@@ -254,6 +254,33 @@ try:
     det_txt = h.ev("document.getElementById('det-insights-grid').textContent") or ""
     check("insights trazem consistência", "cv" in det_txt, det_txt[:100])
 
+    # 19. histórico cross-período: oculto com 1, visível e coerente com 2
+    h.set_state(FIX_V2)
+    h.ev("state.foco = 'tracking'; renderHome()")
+    check("histórico oculto com 1 período",
+          h.ev("document.getElementById('card-historico').hidden"))
+    h.ev("window.prompt = (m, d) => d; window.confirm = () => true; window.alert = () => {}")
+    h.ev("fecharPeriodo()")
+    # novo período ativo vazio: entries do novo = null (sem aprov) → hint
+    h.ev("state.foco = 'tracking'; renderHome()")
+    check("histórico visível com 2 períodos",
+          h.ev("!document.getElementById('card-historico').hidden"))
+    # lançar nota no período novo pra ter 2 entries
+    h.ev("openModalAddDisc(); document.getElementById('m-nome').value = 'NOVA';"
+         "document.getElementById('modal-save').click()")
+    nid = h.ev("per().disciplinas[0].id")
+    h.ev(f"currentDiscId = '{nid}'")
+    h.ev(f"per().disciplinas[0].ap1.value = 38; per().disciplinas[0].ap1.expectativa = false;"
+         f"pushRecente({{discId: '{nid}', discNome: 'NOVA', tipo: 'ap1', label: 'AP1', valor: 38, max: 40, kind: 'oficial'}});"
+         "saveState(); renderHome()")
+    hist_txt = h.ev("document.getElementById('track-historico').textContent") or ""
+    check("histórico plota CR e delta", "CR" in hist_txt and "vs" in hist_txt, hist_txt[:100])
+    check("melhor/pior histórica aparecem",
+          "melhor histórica" in hist_txt and "pior histórica" in hist_txt, hist_txt[:120])
+    # CR do período novo: 38/40 = 95% → 9.5
+    cr_novo = h.ev("crEquivPeriodo(per())")
+    check("crEquiv do período novo = 9.5", abs(cr_novo - 9.5) < 1e-9, str(cr_novo))
+
     # console limpo no fim
     check("console sem erros", not h.console, "; ".join(h.console[:5]))
 finally:

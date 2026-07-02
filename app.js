@@ -642,6 +642,12 @@ function bandaConsistencia(cv) {
   return { label: 'montanha-russa', cls: 'danger' };
 }
 
+// CR-equivalente do período (0–10): aproveitamento/10 — definido mesmo parcial.
+function crEquivPeriodo(p) {
+  const r = calcPeriodo({}, p);
+  return r.aprov !== null ? r.aprov / 10 : null;
+}
+
 // Leitura da disciplina no detalhe: tendência, forma e consistência locais.
 function renderDetInsights(d) {
   const card = document.getElementById('det-insights');
@@ -1334,6 +1340,62 @@ function renderHomeTracking() {
     }
   }
 
+  // Evolução entre períodos (aparece só com 2+)
+  const hist = document.getElementById('track-historico');
+  const histCard = document.getElementById('card-historico');
+  if (hist && histCard) {
+    if (state.periodos.length < 2) {
+      histCard.hidden = true;
+    } else {
+      const ordenados = state.periodos.slice().sort((a, b) => (a.criadoEm || 0) - (b.criadoEm || 0));
+      const entries = ordenados
+        .map(px => ({ p: px, cr: crEquivPeriodo(px) }))
+        .filter(e => e.cr !== null);
+      histCard.hidden = false;
+      if (entries.length < 2) {
+        hist.innerHTML = '<p class="hint">períodos sem notas suficientes pra comparar</p>';
+      } else {
+        const w = 320, hh = 100, pad = 14;
+        const n = entries.length;
+        const stepX = (w - pad * 2) / Math.max(1, n - 1);
+        const yOf = v => hh - pad - (Math.max(0, Math.min(10, v)) / 10) * (hh - pad * 2);
+        const pts = entries.map((e, i) => (pad + i * stepX).toFixed(1) + ',' + yOf(e.cr).toFixed(1));
+        const dots = entries.map((e, i) =>
+          '<circle cx="' + (pad + i * stepX).toFixed(1) + '" cy="' + yOf(e.cr).toFixed(1) + '" r="3"/>').join('');
+        const labels = entries.map((e, i) =>
+          '<text x="' + (pad + i * stepX).toFixed(1) + '" y="' + (hh - 2) + '" text-anchor="middle" font-size="8" fill="currentColor" fill-opacity="0.7">' + escapeHTML(e.p.nome) + '</text>').join('');
+        const nineY = yOf(9).toFixed(1);
+        const last = entries[n - 1], prev = entries[n - 2];
+        const delta = last.cr - prev.cr;
+
+        let melhor = null, pior = null;
+        state.periodos.forEach(px => px.disciplinas.forEach(d => {
+          const rd = calcDisc(d);
+          if (rd.dist < 40) return; // ignora disciplina com pouca coisa lançada
+          const pcd = rd.earned / rd.dist;
+          if (!melhor || pcd > melhor.pct) melhor = { nome: d.nome, pct: pcd };
+          if (!pior || pcd < pior.pct) pior = { nome: d.nome, pct: pcd };
+        }));
+
+        hist.innerHTML =
+          '<div class="track-stat-hero ' + (delta >= 0.05 ? 'success' : delta <= -0.05 ? 'danger' : '') + '">'
+          + '<span class="track-stat-big">CR ' + fmtNum(last.cr, 2) + '</span>'
+          + '<span class="track-stat-sub">' + escapeHTML(last.p.nome) + ' · ' + (delta >= 0 ? '+' : '') + fmtNum(delta, 2) + ' vs ' + escapeHTML(prev.p.nome) + '</span>'
+          + '</div>'
+          + '<svg class="track-svg" viewBox="0 0 ' + w + ' ' + hh + '" preserveAspectRatio="xMidYMid meet">'
+          + '<line x1="' + pad + '" y1="' + nineY + '" x2="' + (w - pad) + '" y2="' + nineY + '" stroke="currentColor" stroke-dasharray="3 3" stroke-opacity="0.5"/>'
+          + '<text x="' + (w - pad) + '" y="' + (parseFloat(nineY) - 3) + '" text-anchor="end" font-size="8" fill="currentColor" fill-opacity="0.6">stars 9,0</text>'
+          + '<polyline points="' + pts.join(' ') + '" fill="none" stroke="currentColor" stroke-width="1.5"/>'
+          + dots + labels
+          + '</svg>'
+          + (melhor && pior
+            ? '<div class="track-stat-row"><span>melhor histórica</span><span class="track-stat-val success">' + escapeHTML(melhor.nome) + ' · ' + fmtNum(melhor.pct * 100, 0) + '%</span></div>'
+              + '<div class="track-stat-row"><span>pior histórica</span><span class="track-stat-val danger">' + escapeHTML(pior.nome) + ' · ' + fmtNum(pior.pct * 100, 0) + '%</span></div>'
+            : '');
+      }
+    }
+  }
+
   // TP contribution
   const tpEl = document.getElementById('track-tp');
   if (tpEl) {
@@ -1615,6 +1677,7 @@ function resumoPeriodoHTML(p) {
     + '<div class="per-res-tot">'
     + '<span>total <strong>' + fmtNum(r.totalScore, 0) + '</strong> pts</span>'
     + '<span>aproveitamento <strong>' + (r.aprov !== null ? fmtNum(r.aprov, 1) + '%' : '—') + '</strong></span>'
+    + '<span>CR equivalente <strong>' + (r.aprov !== null ? fmtNum(r.aprov / 10, 2) : '—') + '</strong></span>'
     + '<span>stars: <strong>' + starsTxt + '</strong></span>'
     + '</div>'
     + '</div>';
