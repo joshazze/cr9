@@ -158,6 +158,14 @@
         <div class="track-kpi-strip" id="track-kpis"></div>
         <button class="btn primary track-tp-btn" id="btn-edit-tp-track">Editar TP</button>
         <div class="track-chart-card">
+          <div class="track-chart-title">Tendência</div>
+          <div id="track-tendencia"></div>
+        </div>
+        <div class="track-chart-card">
+          <div class="track-chart-title">Forma atual</div>
+          <div id="track-forma"></div>
+        </div>
+        <div class="track-chart-card">
           <div class="track-chart-title">Expectativa vs Oficial</div>
           <div id="track-exp-vs-of"></div>
         </div>
@@ -168,6 +176,10 @@
         <div class="track-chart-card">
           <div class="track-chart-title">Aproveitamento por disciplina</div>
           <div id="track-aprov-list"></div>
+        </div>
+        <div class="track-chart-card">
+          <div class="track-chart-title">Consistência</div>
+          <div id="track-consistencia"></div>
         </div>
         <div class="track-chart-card">
           <div class="track-chart-title">Progressão</div>
@@ -247,6 +259,11 @@
         <div class="metric-value"><span id="det-earned">0</span><span class="metric-unit"> / <span id="det-dist">0</span> de 100</span></div>
         <div class="bar"><div class="bar-fill" id="det-bar"></div></div>
         <div class="metric-hint" id="det-status">sem notas</div>
+      </div>
+
+      <div class="metric-card det-insights" id="det-insights" hidden>
+        <div class="metric-label">Leitura da disciplina</div>
+        <div class="det-insights-grid" id="det-insights-grid"></div>
       </div>
 
       <div class="section">

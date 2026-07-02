@@ -222,6 +222,38 @@ try:
     check("prob state out",
           h.ev("calcStarsProbability(calcPeriodo()).state") == "out")
 
+    # 16. analytics: tendência e forma com série crescente
+    h.set_state(fix_mc)
+    h.ev("per().lancamentos = ["
+         "{ts: 1, discId: 'm0', slot: 'ap1', valor: 20, max: 40, kind: 'oficial'},"
+         "{ts: 2, discId: 'm1', slot: 'ap1', valor: 24, max: 40, kind: 'oficial'},"
+         "{ts: 3, discId: 'm2', slot: 'ap1', valor: 30, max: 40, kind: 'oficial'},"
+         "{ts: 4, discId: 'm3', slot: 'ap1', valor: 36, max: 40, kind: 'oficial'}"
+         "]; saveState(); state.foco = 'tracking'; renderHome()")
+    tend_txt = h.ev("document.getElementById('track-tendencia').textContent") or ""
+    check("tendência sobe com série crescente", "▲" in tend_txt and "+" in tend_txt, tend_txt[:80])
+    forma_txt = h.ev("document.getElementById('track-forma').textContent") or ""
+    check("forma em alta", "em alta" in forma_txt, forma_txt[:80])
+
+    # 17. dedupe da série: reeditar um slot substitui em vez de somar
+    h.set_state(FIX_V2)
+    soma0 = h.ev("seriePontos(per()).reduce((s, e) => s + e.pts, 0)")
+    h.ev("pushRecente({discId: 'd1', discNome: 'POO', tipo: 'ap1', label: 'AP1',"
+         " valor: 40, max: 40, kind: 'oficial'}); saveState()")
+    soma1 = h.ev("seriePontos(per()).reduce((s, e) => s + e.pts, 0)")
+    check("edição substitui na série (sem double-count)",
+          soma0 == 57 and soma1 == 65, f"antes={soma0} depois={soma1}")
+
+    # 18. consistência estática (cv) e insights no detalhe
+    h.ev("state.foco = 'tracking'; renderHome()")
+    cons_txt = h.ev("document.getElementById('track-consistencia').textContent") or ""
+    check("consistência com banda", "cirúrgico" in cons_txt or "consistente" in cons_txt, cons_txt[:100])
+    h.ev("openDetalhe('d1')")
+    check("det-insights visível com dados",
+          h.ev("!document.getElementById('det-insights').hidden"))
+    det_txt = h.ev("document.getElementById('det-insights-grid').textContent") or ""
+    check("insights trazem consistência", "cv" in det_txt, det_txt[:100])
+
     # console limpo no fim
     check("console sem erros", not h.console, "; ".join(h.console[:5]))
 finally:

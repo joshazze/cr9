@@ -2370,6 +2370,87 @@ header::before {
   margin-top: 10px;
   font-style: italic;
 }
+
+/* ── Analytics (tendência / forma / consistência) ── */
+.track-stat-hero {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.track-stat-ico { font-size: 1rem; }
+.track-stat-big {
+  font: 600 1.5rem/1.1 var(--serif);
+  color: var(--text);
+}
+.track-stat-hero.success .track-stat-big { color: var(--success); }
+.track-stat-hero.danger .track-stat-big { color: var(--danger); }
+.track-stat-sub {
+  font: 500 0.75rem/1.3 var(--sans);
+  color: var(--text-dim);
+}
+.track-stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border);
+  font: 500 0.82rem/1.4 var(--sans);
+  color: var(--text);
+}
+.track-stat-row:last-child { border-bottom: none; }
+.track-stat-val { color: var(--text-dim); font-weight: 600; }
+.track-stat-val.success { color: var(--success); }
+.track-stat-val.danger { color: var(--danger); }
+.badge-band {
+  padding: 3px 9px;
+  border-radius: 999px;
+  font: 600 0.68rem/1.4 var(--sans);
+  background: var(--bg2);
+  border: 1px solid var(--border-strong);
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.badge-band.success {
+  background: var(--success-soft);
+  border-color: var(--success);
+  color: var(--success);
+}
+.badge-band.warning {
+  background: var(--warning-soft);
+  border-color: var(--warning);
+  color: var(--warning);
+}
+.badge-band.danger {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.det-insights-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-top: 10px;
+}
+.det-ins { display: flex; flex-direction: column; gap: 2px; }
+.det-ins-label {
+  font: 600 0.62rem/1.4 var(--sans);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.det-ins-val {
+  font: 600 0.9rem/1.2 var(--sans);
+  color: var(--text);
+}
+.det-ins-val.success { color: var(--success); }
+.det-ins-val.danger { color: var(--danger); }
+.det-ins-val.dim { color: var(--text-muted); }
+.det-ins-sub {
+  font: 500 0.68rem/1.3 var(--sans);
+  color: var(--text-dim);
+}
 .track-prof-row {
   display: flex;
   justify-content: space-between;

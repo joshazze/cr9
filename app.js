@@ -577,6 +577,120 @@ function remainingSlots(periodo = per()) {
   return slots;
 }
 
+// ───────── ANALYTICS (série de lançamentos) ─────────
+
+// Série de RENDIMENTO por lançamento: dedupe por (discId, slot) mantendo o
+// último evento (edição substitui), TP fora (escala 0–1 distorce), disciplina
+// deletada fora. Retorna [{ts, y}] com y = valor/max em [0,1], ordem cronológica.
+function serieRendimento(periodo, opts = {}) {
+  const oficialOnly = opts.oficialOnly !== false;
+  const vivos = new Set(periodo.disciplinas.map(d => d.id));
+  const porSlot = new Map();
+  (periodo.lancamentos || []).forEach(l => {
+    if (!l || l.slot === 'tp') return;
+    if (typeof l.valor !== 'number' || typeof l.max !== 'number' || l.max <= 0) return;
+    if (!l.discId || !vivos.has(l.discId)) return;
+    if (opts.discId && l.discId !== opts.discId) return;
+    if (oficialOnly && l.kind === 'expectativa') return;
+    porSlot.set(l.discId + '|' + l.slot, l); // array é cronológico: último vence
+  });
+  return Array.from(porSlot.values())
+    .sort((a, b) => a.ts - b.ts)
+    .map(l => ({ ts: l.ts, y: l.valor / l.max }));
+}
+
+// Série de PONTOS reais (pra timeline/progressão): mesmo dedupe, mas em pontos
+// absolutos; TP entra pelo bônus (round(v×10)), não pela nota bruta 0–1.
+function seriePontos(periodo) {
+  const vivos = new Set(periodo.disciplinas.map(d => d.id));
+  const porSlot = new Map();
+  (periodo.lancamentos || []).forEach(l => {
+    if (!l || typeof l.valor !== 'number') return;
+    if (l.slot === 'tp') { porSlot.set('tp', l); return; } // TP é único no período
+    if (!l.discId || !vivos.has(l.discId)) return;
+    porSlot.set(l.discId + '|' + l.slot, l);
+  });
+  return Array.from(porSlot.values())
+    .sort((a, b) => a.ts - b.ts)
+    .map(l => ({ ts: l.ts, pts: l.slot === 'tp' ? Math.round(l.valor * 10) : l.valor }));
+}
+
+// Notas normalizadas dos slots JÁ preenchidos (estático — funciona pra período
+// antigo sem série). Base da consistência.
+function notasNormalizadasDisc(d) {
+  const ys = [];
+  if (d.ap1.value !== null && d.ap1.value !== undefined) ys.push(d.ap1.value / 40);
+  if (d.ap2.value !== null && d.ap2.value !== undefined) ys.push(d.ap2.value / 40);
+  const mode = d.acMode || 'custom';
+  if (mode === 'equal') {
+    d.acs.forEach(ac => {
+      if (ac.delivered === true) ys.push(1);
+      else if (ac.delivered === false) ys.push(0);
+    });
+  } else {
+    d.acs.forEach(ac => {
+      if (ac.value !== null && ac.value !== undefined && ac.valor > 0) ys.push(ac.value / ac.valor);
+    });
+  }
+  return ys;
+}
+
+function bandaConsistencia(cv) {
+  if (cv <= 0.10) return { label: 'cirúrgico', cls: 'success' };
+  if (cv <= 0.25) return { label: 'consistente', cls: 'success' };
+  if (cv <= 0.45) return { label: 'oscilando', cls: 'warning' };
+  return { label: 'montanha-russa', cls: 'danger' };
+}
+
+// Leitura da disciplina no detalhe: tendência, forma e consistência locais.
+function renderDetInsights(d) {
+  const card = document.getElementById('det-insights');
+  const grid = document.getElementById('det-insights-grid');
+  if (!card || !grid) return;
+
+  const ys = serieRendimento(per(), { discId: d.id }).map(pt => pt.y);
+  const reg = CR9Math.linearRegression(ys);
+  const cv = CR9Math.coefVar(notasNormalizadasDisc(d));
+
+  let formaHTML = null;
+  if (ys.length >= 3) {
+    const ew = CR9Math.ewma(ys.slice(-10), 0.4);
+    const media = CR9Math.mean(ys);
+    const delta = (ew - media) * 100;
+    const st = delta >= 3 ? { t: 'em alta', cls: 'success' }
+      : delta <= -3 ? { t: 'em baixa', cls: 'danger' }
+      : { t: 'estável', cls: '' };
+    formaHTML = '<span class="det-ins-val ' + st.cls + '">' + st.t + '</span>'
+      + '<span class="det-ins-sub">' + (delta >= 0 ? '+' : '') + fmtNum(delta, 1) + ' pts% vs média</span>';
+  }
+
+  let tendHTML = null;
+  if (reg) {
+    const sp = reg.slope * 100;
+    const cls = sp >= 0.5 ? 'success' : sp <= -0.5 ? 'danger' : '';
+    const ico = sp >= 0.5 ? '▲' : sp <= -0.5 ? '▼' : '→';
+    tendHTML = '<span class="det-ins-val ' + cls + '">' + ico + ' ' + (sp >= 0 ? '+' : '') + fmtNum(sp, 1) + ' pts%</span>'
+      + '<span class="det-ins-sub">por lançamento · R² ' + fmtNum(reg.r2, 2) + '</span>';
+  }
+
+  let consHTML = null;
+  if (cv) {
+    const b = bandaConsistencia(cv.cv);
+    consHTML = '<span class="det-ins-val ' + b.cls + '">' + b.label + '</span>'
+      + '<span class="det-ins-sub">cv ' + fmtNum(cv.cv, 2) + ' em ' + cv.n + ' notas</span>';
+  }
+
+  if (!formaHTML && !tendHTML && !consHTML) {
+    card.hidden = true;
+    return;
+  }
+  card.hidden = false;
+  grid.innerHTML = ''
+    + '<div class="det-ins"><span class="det-ins-label">tendência</span>' + (tendHTML || '<span class="det-ins-val dim">—</span><span class="det-ins-sub">3+ lançamentos</span>') + '</div>'
+    + '<div class="det-ins"><span class="det-ins-label">forma</span>' + (formaHTML || '<span class="det-ins-val dim">—</span><span class="det-ins-sub">3+ lançamentos</span>') + '</div>'
+    + '<div class="det-ins"><span class="det-ins-label">consistência</span>' + (consHTML || '<span class="det-ins-val dim">—</span><span class="det-ins-sub">3+ notas</span>') + '</div>';
+}
+
 // Probabilidade do Stars: posterior Beta(7+ganhos, 3+perdidos) do rendimento
 // + Monte Carlo (20k draws, seed determinístico do estado) sobre os slots
 // restantes. Estados especiais decididos antes da simulação; "garantido"
@@ -1036,6 +1150,67 @@ function renderHomeTracking() {
       + '<div class="track-kpi"><div class="track-kpi-label">projeção stars</div><div class="track-kpi-value">' + projTxt + '</div></div>';
   }
 
+  // Tendência (regressão linear sobre a série de rendimento oficial)
+  const tend = document.getElementById('track-tendencia');
+  if (tend) {
+    const serie = serieRendimento(per());
+    const reg = CR9Math.linearRegression(serie.map(pt => pt.y));
+    if (!reg) {
+      tend.innerHTML = '<p class="hint">precisa de 3+ lançamentos oficiais pra medir tendência</p>';
+    } else {
+      const slopePP = reg.slope * 100; // pontos percentuais de rendimento por lançamento
+      const dir = slopePP >= 0.5 ? { ico: '▲', cls: 'success', txt: 'subindo' }
+        : slopePP <= -0.5 ? { ico: '▼', cls: 'danger', txt: 'caindo' }
+        : { ico: '→', cls: '', txt: 'estável' };
+      const conf = reg.r2 >= 0.5 ? 'tendência clara' : 'tendência ruidosa';
+      const porDisc = per().disciplinas.map(d => {
+        const sd = serieRendimento(per(), { discId: d.id });
+        const rd = CR9Math.linearRegression(sd.map(pt => pt.y));
+        if (!rd) return '';
+        const sp = rd.slope * 100;
+        const di = sp >= 0.5 ? '▲' : sp <= -0.5 ? '▼' : '→';
+        const dc = sp >= 0.5 ? 'success' : sp <= -0.5 ? 'danger' : '';
+        return '<div class="track-stat-row"><span>' + escapeHTML(d.nome) + '</span>'
+          + '<span class="track-stat-val ' + dc + '">' + di + ' ' + (sp >= 0 ? '+' : '') + fmtNum(sp, 1) + ' pts%</span></div>';
+      }).join('');
+      tend.innerHTML = '<div class="track-stat-hero ' + dir.cls + '">'
+        + '<span class="track-stat-ico">' + dir.ico + '</span>'
+        + '<span class="track-stat-big">' + (slopePP >= 0 ? '+' : '') + fmtNum(slopePP, 1) + ' pts%</span>'
+        + '<span class="track-stat-sub">por lançamento · ' + dir.txt + '</span>'
+        + '</div>'
+        + '<p class="track-fun-hint">R² ' + fmtNum(reg.r2, 2) + ' · ' + conf + ' · ' + reg.n + ' lançamentos</p>'
+        + porDisc;
+    }
+  }
+
+  // Forma atual (EWMA dos últimos lançamentos vs média do período)
+  const forma = document.getElementById('track-forma');
+  if (forma) {
+    const ys = serieRendimento(per()).map(pt => pt.y);
+    if (ys.length < 3) {
+      forma.innerHTML = '<p class="hint">precisa de 3+ lançamentos oficiais pra medir a forma</p>';
+    } else {
+      const recentes = ys.slice(-10);
+      const ew = CR9Math.ewma(recentes, 0.4);
+      const media = CR9Math.mean(ys);
+      const delta = (ew - media) * 100;
+      const st = delta >= 3 ? { emoji: '🔥', label: 'em alta', cls: 'success' }
+        : delta <= -3 ? { emoji: '🧊', label: 'em baixa', cls: 'danger' }
+        : { emoji: '➖', label: 'estável', cls: '' };
+      const ewW = Math.max(0, Math.min(100, ew * 100));
+      const medW = Math.max(0, Math.min(100, media * 100));
+      forma.innerHTML = '<div class="track-stat-hero ' + st.cls + '">'
+        + '<span class="track-stat-ico">' + st.emoji + '</span>'
+        + '<span class="track-stat-big">' + st.label + '</span>'
+        + '<span class="track-stat-sub">' + (delta >= 0 ? '+' : '') + fmtNum(delta, 1) + ' pts% vs média</span>'
+        + '</div>'
+        + '<div class="track-vs">'
+        + '<div class="track-vs-row"><span class="track-vs-label">forma</span><div class="track-bar"><div class="track-bar-of" style="width:' + ewW + '%"></div></div><span class="track-vs-val">' + fmtNum(ew * 100, 0) + '%</span></div>'
+        + '<div class="track-vs-row"><span class="track-vs-label">média</span><div class="track-bar"><div class="track-bar-avg" style="width:' + medW + '%"></div></div><span class="track-vs-val">' + fmtNum(media * 100, 0) + '%</span></div>'
+        + '</div>';
+    }
+  }
+
   // Expectativa vs Oficial
   const evo = document.getElementById('track-exp-vs-of');
   if (evo) {
@@ -1056,17 +1231,18 @@ function renderHomeTracking() {
     }
   }
 
-  // Timeline SVG sparkline
+  // Timeline SVG sparkline — pontos REAIS acumulados (série deduplicada;
+  // edição substitui, TP entra pelo bônus)
   const tl = document.getElementById('track-timeline');
   if (tl) {
-    const recs = (per().recentes || []).slice().reverse();
-    if (recs.length === 0) {
+    const eventos = seriePontos(per());
+    if (eventos.length === 0) {
       tl.innerHTML = '<p class="hint">sem lançamentos pra plotar</p>';
     } else {
       const w = 320, h = 80, pad = 6;
       const cum = [];
       let acc = 0;
-      recs.forEach(r => { acc += (typeof r.valor === 'number' ? r.valor : 0); cum.push(acc); });
+      eventos.forEach(ev => { acc += ev.pts; cum.push(acc); });
       const maxV = Math.max.apply(null, cum) || 1;
       const stepX = (w - pad * 2) / Math.max(1, cum.length - 1);
       const pts = cum.map((v, i) => {
@@ -1109,17 +1285,36 @@ function renderHomeTracking() {
     }
   }
 
-  // Progressão SVG
+  // Consistência por disciplina (CV das notas normalizadas — estático)
+  const cons = document.getElementById('track-consistencia');
+  if (cons) {
+    if (per().disciplinas.length === 0) {
+      cons.innerHTML = '<p class="hint">crie disciplinas pra ver</p>';
+    } else {
+      const rows = per().disciplinas.map(d => {
+        const cv = CR9Math.coefVar(notasNormalizadasDisc(d));
+        const badge = cv === null
+          ? '<span class="badge-band">poucos dados</span>'
+          : (() => { const b = bandaConsistencia(cv.cv);
+              return '<span class="badge-band ' + b.cls + '">' + b.label + ' · cv ' + fmtNum(cv.cv, 2) + '</span>'; })();
+        return '<div class="track-stat-row"><span>' + escapeHTML(d.nome) + '</span>' + badge + '</div>';
+      }).join('');
+      cons.innerHTML = rows
+        + '<p class="track-fun-hint">cv = desvio ÷ média das notas normalizadas. quanto menor, mais previsível.</p>';
+    }
+  }
+
+  // Progressão SVG — pontos reais acumulados rumo à meta do Stars
   const pr = document.getElementById('track-progress');
   if (pr) {
-    const recs = (per().recentes || []).slice().reverse();
-    if (recs.length === 0) {
+    const eventos = seriePontos(per());
+    if (eventos.length === 0) {
       pr.innerHTML = '<p class="hint">sem dados de progressão</p>';
     } else {
       const w = 320, h = 100, pad = 8;
       const cum = [];
       let acc = 0;
-      recs.forEach(r => { acc += (typeof r.valor === 'number' ? r.valor : 0); cum.push(acc); });
+      eventos.forEach(ev => { acc += ev.pts; cum.push(acc); });
       const need = p.starsNeeded || 450;
       const maxV = Math.max(need, cum[cum.length - 1] || 1);
       const stepX = (w - pad * 2) / Math.max(1, cum.length - 1);
@@ -1552,6 +1747,8 @@ function renderDetalhe() {
     : pct >= 70 ? 'aproveitamento ' + fmtNum(pct, 1) + '% · dentro da média'
     : pct >= 60 ? 'aproveitamento ' + fmtNum(pct, 1) + '% · abaixo da média'
     : 'aproveitamento ' + fmtNum(pct, 1) + '% · muito abaixo';
+
+  renderDetInsights(d);
 
   const acsAssigned = (d.acs || []).every(ac => {
     if ((d.acMode || 'custom') === 'equal') return ac.delivered === true || ac.delivered === false;
