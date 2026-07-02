@@ -275,7 +275,11 @@ function loadState() {
 }
 
 function saveState() {
-  localStorage.setItem(KEY, JSON.stringify(state));
+  try {
+    localStorage.setItem(KEY, JSON.stringify(state));
+  } catch (e) {
+    alert('Falha ao salvar os dados (armazenamento cheio ou indisponível).');
+  }
 }
 
 function pushRecente(entry) {
@@ -609,13 +613,11 @@ function renderProbCard(p) {
   }
 }
 
+// Cor acompanha o número exibido (sem TP) — TP aparece no badge e na barra.
 function discStatus(d) {
   const r = calcDisc(d);
-  const tpB = tpBonusForDisc(d.id);
-  const earnedTotal = r.earned + tpB;
-  const distTotal = r.dist + tpB;
-  if (distTotal === 0) return '';
-  const pct = (earnedTotal / distTotal) * 100;
+  if (r.dist === 0) return '';
+  const pct = (r.earned / r.dist) * 100;
   if (pct >= 70) return 'ok';
   if (pct >= 60) return 'warn';
   return 'danger';
@@ -1250,7 +1252,7 @@ function renderDetalhe() {
   const allGradesAssigned = d.ap1.value !== null && d.ap1.value !== undefined
     && d.ap2.value !== null && d.ap2.value !== undefined
     && acsAssigned;
-  if (allGradesAssigned && !d.asAutoTriggered) {
+  if (allGradesAssigned && r.earned < 70 && !d.asAutoTriggered) {
     d.showAS = true;
     d.asAutoTriggered = true;
     saveState();
@@ -1408,7 +1410,12 @@ function renderSimulador() {
       const key = inp.dataset.key;
       const simD = ensureSim(discId);
       const raw = inp.value;
-      const val = raw === '' ? undefined : parseFloat(raw);
+      let val = raw === '' ? undefined : parseFloat(raw);
+      if (val !== undefined && !isNaN(val)) {
+        const mx = parseFloat(inp.max);
+        const clamped = Math.min(isNaN(mx) ? val : mx, Math.max(0, val));
+        if (clamped !== val) { val = clamped; inp.value = String(val); }
+      }
       if (key.startsWith('ac_')) {
         simD.acs[key.slice(3)] = isNaN(val) ? undefined : val;
       } else if (key === 'acExtra') {
@@ -1574,11 +1581,12 @@ function openModal(title, bodyHTML, onSave) {
   newSave.addEventListener('click', () => {
     if (onSave()) modal.hidden = true;
   });
-
-  modal.querySelectorAll('[data-close]').forEach(el => {
-    el.addEventListener('click', () => { modal.hidden = true; });
-  });
 }
+
+// Fechar modal: bind único (elementos estáticos; rebind por abertura vazava listeners)
+document.querySelectorAll('#modal [data-close]').forEach(el => {
+  el.addEventListener('click', () => { document.getElementById('modal').hidden = true; });
+});
 
 function openModalAddDisc() {
   openModal(
