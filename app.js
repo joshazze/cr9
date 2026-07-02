@@ -2,6 +2,8 @@
 
 const KEY = 'cr9-v1';
 const MAX_RECENTES = 12;
+// Bumpar junto com CACHE_NAME do sw.js a cada deploy.
+const APP_VERSION = 'v16';
 
 // ───────── HELPERS ─────────
 
@@ -1159,8 +1161,10 @@ function renderConfig() {
   const p = calcPeriodo();
   const discEl = document.getElementById('cfg-stat-disc');
   const ptsEl = document.getElementById('cfg-stat-pts');
+  const verEl = document.getElementById('cfg-stat-ver');
   if (discEl) discEl.textContent = String(p.n);
   if (ptsEl) ptsEl.textContent = p.n === 0 ? '0' : String(Math.round(p.totalScore));
+  if (verEl) verEl.textContent = APP_VERSION;
 }
 
 // ───────── RENDER: DISCIPLINAS ─────────
