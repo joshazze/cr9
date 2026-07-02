@@ -14,7 +14,6 @@
   <img src="https://img.shields.io/badge/vanilla-JS-f7df1e" alt="Vanilla JS">
   <img src="https://img.shields.io/badge/PWA-installable-5A0FC8" alt="PWA">
   <img src="https://img.shields.io/badge/storage-localStorage-orange" alt="localStorage">
-  <img src="https://img.shields.io/badge/sync-Firebase%20RTDB-FFCA28" alt="Firebase RTDB">
   <img src="https://img.shields.io/badge/deploy-GitHub%20Pages-181717" alt="GitHub Pages">
 </p>
 
@@ -31,7 +30,6 @@ Então fiz o meu. Vanilla stack, zero dependências em runtime, instalável no i
 - **HTML/CSS/JS puros** — nenhum framework, nenhum bundler, nenhum npm
 - **PWA completa** — manifest, service worker com cache estratégico, instalável
 - **localStorage** como source of truth, com versionamento de schema e migrations idempotentes
-- **Firebase Realtime Database** opcional para sync entre dispositivos — sem login, pareamento por código de 6 caracteres
 - **Fraunces + Inter**, paleta cream/copper, suporte a dark mode via `prefers-color-scheme`
 
 ~5k LOC entre `app.js`, `style.css` e `index.html`.
@@ -47,7 +45,7 @@ Então fiz o meu. Vanilla stack, zero dependências em runtime, instalável no i
 
 ## Decisões de design
 
-- **Sem login por padrão.** O app funciona 100% offline com localStorage. Sync é opt-in e o código pareado (`A7X-3K9`) é a única credencial.
+- **Sem login, sem servidor.** O app funciona 100% offline com localStorage; backup e migração entre dispositivos via export/import de JSON.
 - **Schema versionado.** `loadState` chama `migrateState` em toda leitura e em todo import — refs órfãs (ex: TP apontando pra disciplina deletada) são limpas automaticamente.
 - **Flags one-shot.** `asAutoTriggered` liga a seção de AS uma vez quando faz sentido, mas respeita o toggle do usuário daí em diante. Comportamento automático sem ser invasivo.
 - **Mobile-first de verdade.** Todos os toques testados em iOS Safari, que tem quirks próprios de delegação de eventos e áreas clicáveis.
@@ -68,7 +66,7 @@ Service worker e PWA precisam de HTTPS em produção, mas funcionam em `localhos
 ```
 cr9/
 ├── index.html      # shell com as 4 telas (home, disciplinas, simulador, config)
-├── app.js          # estado, cálculos, renderização, sync
+├── app.js          # estado, cálculos, renderização
 ├── style.css       # design system completo
 ├── sw.js           # service worker
 ├── manifest.json
