@@ -522,6 +522,13 @@ function calcPeriodo(sim = {}, periodo = per()) {
     tpBonus = Math.round(tp.value * 10);
   }
 
+  // Total só com notas oficiais (previsões fora) — é o gate do "garantido".
+  let earnedOficial = 0;
+  periodo.disciplinas.forEach(d => { earnedOficial += calcDiscOficialOnly(d).earned; });
+  const tpOficial = (tp && tp.value !== null && tp.value !== undefined && tp.applyTo && !tp.expectativa)
+    ? Math.round(tp.value * 10) : 0;
+  const totalOficial = earnedOficial + tpOficial;
+
   const aprov = distReg > 0 ? (earnedReg / distReg) * 100 : null;
   const totalScore = earnedReg + tpBonus;
   const enrolledOk = n >= 4;
@@ -533,22 +540,48 @@ function calcPeriodo(sim = {}, periodo = per()) {
   return {
     n, total, starsNeeded,
     earnedReg, distReg,
-    tpBonus, totalScore,
+    tpBonus, totalScore, totalOficial,
     aprov, anyAS, enrolledOk,
     starsEligible, starsProgress
   };
 }
 
-function normalCdf(z) {
-  if (z > 38) return 1;
-  if (z < -38) return 0;
-  const t = 1 / (1 + 0.2316419 * Math.abs(z));
-  const d = 0.3989422804014327 * Math.exp(-z * z / 2);
-  const poly = t * (0.319381530 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))));
-  const tail = d * poly;
-  return z >= 0 ? 1 - tail : tail;
+// Slots de pontuação ainda não lançados do período ativo.
+// Invariante: Σ max === total − distReg (mesma contabilidade do calcDisc).
+function remainingSlots(periodo = per()) {
+  const slots = [];
+  periodo.disciplinas.forEach(d => {
+    const r = calcDisc(d);
+    if (r.ap1F === null || r.ap1F === undefined) slots.push({ max: 40 });
+    if (r.ap2F === null || r.ap2F === undefined) slots.push({ max: 40 });
+    const mode = d.acMode || 'custom';
+    if (mode === 'equal') {
+      const n = d.acs.length;
+      if (n === 0) {
+        slots.push({ max: 20 });
+      } else {
+        const share = 20 / n;
+        d.acs.forEach(ac => {
+          if (ac.delivered !== true && ac.delivered !== false) slots.push({ max: share });
+        });
+      }
+    } else {
+      d.acs.forEach(ac => {
+        if (ac.value === null || ac.value === undefined) slots.push({ max: ac.valor });
+      });
+      const alocado = d.acs.reduce((s, ac) => s + (ac.valor || 0), 0);
+      const resto = 20 - alocado;
+      if (resto > 0.01) slots.push({ max: resto });
+    }
+  });
+  return slots;
 }
 
+// Probabilidade do Stars: posterior Beta(7+ganhos, 3+perdidos) do rendimento
+// + Monte Carlo (20k draws, seed determinístico do estado) sobre os slots
+// restantes. Estados especiais decididos antes da simulação; "garantido"
+// exige pontos OFICIAIS (previsão não trava).
+let mcMemo = null;
 function calcStarsProbability(p) {
   if (p.n === 0) return { state: 'empty' };
   if (p.anyAS) return { state: 'out' };
@@ -557,35 +590,40 @@ function calcStarsProbability(p) {
 
   const remaining = Math.max(0, p.total - p.distReg);
   const need = p.starsNeeded - p.totalScore;
+  const rate = (p.earnedReg / p.distReg) * 100;
 
-  if (need <= 0) {
-    return { state: 'locked', remaining, need: 0, rate: (p.earnedReg / p.distReg) * 100, projected: p.totalScore };
+  if (p.starsNeeded - p.totalOficial <= 0) {
+    return { state: 'locked', remaining, need: 0, rate, projected: p.totalScore };
   }
   if (need > remaining) {
     const maxPossible = p.totalScore + remaining;
-    return { state: 'impossible', remaining, need, rate: (p.earnedReg / p.distReg) * 100, projected: maxPossible };
+    return { state: 'impossible', remaining, need, rate, projected: maxPossible };
   }
 
-  const rate = p.earnedReg / p.distReg;
-  const needRate = need / remaining;
-
-  // Normal approximation with shrinkage: more distributed points → tighter variance.
-  // Aleatoric term: remaining * rate * (1-rate) treats each "point slot" as Bernoulli-ish.
-  // Epistemic term: rate itself is uncertain — inflate by (1 + remaining/distReg).
-  const shrinkage = 1 + remaining / p.distReg;
-  const variance = Math.max(remaining * rate * (1 - rate) * shrinkage, 1);
-  const sigma = Math.sqrt(variance);
-  const mean = remaining * rate;
-  const z = (mean - need) / sigma;
-  const prob = normalCdf(z);
-  const pct = Math.max(0, Math.min(100, prob * 100));
+  const slots = remainingSlots();
+  const alpha = 7 + p.earnedReg;
+  const beta = 3 + (p.distReg - p.earnedReg);
+  const seed = CR9Math.fnv1a(JSON.stringify([
+    per().id,
+    Math.round(p.earnedReg * 100),
+    Math.round(p.distReg * 100),
+    p.starsNeeded,
+    Math.round(p.totalScore * 100),
+    slots.map(s => Math.round(s.max * 100))
+  ]));
+  const mc = (mcMemo && mcMemo.seed === seed)
+    ? mcMemo.result
+    : CR9Math.starsMonteCarlo({ slots, need, alpha, beta, draws: 20000, seed, kappa: 12 });
+  mcMemo = { seed, result: mc };
 
   return {
     state: 'computed',
-    pct,
-    rate: rate * 100,
-    needRate: needRate * 100,
-    projected: p.totalScore + mean,
+    pct: mc.pct,
+    rate,
+    needRate: remaining > 0 ? (need / remaining) * 100 : 0,
+    projected: p.totalScore + mc.mean,
+    projLo: p.totalScore + mc.p10,
+    projHi: p.totalScore + mc.p90,
     remaining,
     need
   };
@@ -735,7 +773,8 @@ function renderProbCard(p) {
   statusEl.textContent = label;
   statusEl.className = 'stars-status' + (cls ? ' ' + cls : '');
 
-  projEl.textContent = fmtNum(prob.projected, 0) + ' pts';
+  projEl.innerHTML = fmtNum(prob.projected, 0)
+    + ' <span class="prob-proj-range">(' + fmtNum(prob.projLo, 0) + '–' + fmtNum(prob.projHi, 0) + ')</span>';
   const needRateTxt = fmtNum(prob.needRate, 0) + '%';
   needEl.textContent = needRateTxt + ' de ' + fmtNum(prob.remaining, 0);
   rateEl.textContent = fmtNum(prob.rate, 1) + '%';
@@ -853,15 +892,15 @@ function renderHomeStars() {
   // hero/ring class modifiers
   let heroMod = '';
   if (!p.starsEligible) heroMod = 'out';
-  else if (p.n > 0 && p.totalScore >= p.starsNeeded) heroMod = 'in';
+  else if (p.n > 0 && p.totalOficial >= p.starsNeeded) heroMod = 'in';
   hero.className = 'stars-hero' + (heroMod ? ' ' + heroMod : '');
   ring.className = 'stars-ring' + (heroMod ? ' ' + heroMod : '');
 
-  // Status pill
+  // Status pill — "No Stars" só com pontos oficiais (previsão não trava)
   if (!p.starsEligible) {
     statusEl.textContent = 'Fora do Stars';
     statusEl.className = 'stars-status out';
-  } else if (p.n > 0 && p.totalScore >= p.starsNeeded) {
+  } else if (p.n > 0 && p.totalOficial >= p.starsNeeded) {
     statusEl.textContent = 'No Stars';
     statusEl.className = 'stars-status in';
   } else {
@@ -877,8 +916,10 @@ function renderHomeStars() {
   } else if (!p.enrolledOk) {
     const falta = 4 - p.n;
     hintEl.innerHTML = 'precisa estar matriculado em ao menos <strong>4 disciplinas</strong> (falta ' + falta + ')';
+  } else if (p.totalOficial >= p.starsNeeded) {
+    hintEl.innerHTML = 'você garantiu o Stars com ' + Math.round(p.totalOficial) + ' pontos oficiais';
   } else if (p.totalScore >= p.starsNeeded) {
-    hintEl.innerHTML = 'você garantiu o Stars com ' + Math.round(p.totalScore) + ' pontos';
+    hintEl.innerHTML = 'projeção em <strong>' + Math.round(p.totalScore) + '</strong> — acima da meta, falta virar oficial';
   } else {
     hintEl.innerHTML = 'faltam <strong>' + fmtNum(p.starsNeeded - p.totalScore, 1) + '</strong> pontos — ainda dá';
   }
@@ -1214,7 +1255,7 @@ function renderHomeRegistro() {
   if (summary) {
     const p = calcPeriodo();
     const pct = p.total > 0 ? Math.round(p.earnedReg / p.total * 100) : 0;
-    const starsOk = p.totalScore >= (p.starsNeeded || 450) && p.n >= 4;
+    const starsOk = p.starsEligible && p.totalOficial >= (p.starsNeeded || 450);
     summary.innerHTML = ''
       + '<div class="reg-sum-item"><span class="reg-sum-num">' + fmtNum(p.totalScore, 0) + '</span><span class="reg-sum-lbl">pontos</span></div>'
       + '<div class="reg-sum-item"><span class="reg-sum-num">' + pct + '%</span><span class="reg-sum-lbl">aproveitamento</span></div>'
@@ -1369,7 +1410,7 @@ function resumoPeriodoHTML(p) {
       + '<td>' + fmtNum(rd.earned, 1) + '<span class="per-res-dim">/100</span></td>'
       + '<td>' + (pct !== null ? fmtNum(pct, 0) + '%' : '—') + '</td></tr>';
   }).join('');
-  const starsOk = r.enrolledOk && !r.anyAS && r.totalScore >= r.starsNeeded;
+  const starsOk = r.enrolledOk && !r.anyAS && r.totalOficial >= r.starsNeeded;
   const starsTxt = r.anyAS ? 'fora (AS oficial)'
     : !r.enrolledOk ? 'não elegível (menos de 4 disciplinas)'
     : starsOk ? 'conquistado ✦' : fmtNum(r.totalScore, 0) + ' de ' + r.starsNeeded + ' pts';

@@ -950,6 +950,11 @@ header::before {
 .per-res-tot strong { color: var(--text); }
 
 /* ── Probability card (Stars chances) ── */
+.prob-proj-range {
+  color: var(--text-muted);
+  font-size: 0.82em;
+  font-weight: 500;
+}
 .prob-card {
   position: relative;
   overflow: hidden;

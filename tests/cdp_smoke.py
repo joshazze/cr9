@@ -156,6 +156,72 @@ try:
           h.ev("document.getElementById('modal-save').style.display !== 'none'"))
     h.ev("document.getElementById('modal').hidden = true")
 
+    # 13. probabilidade Monte Carlo: computed, estável, invariante de slots
+    h.set_state(FIX_V2)
+    check("fixture de notas baixas dá impossible (need > restante)",
+          h.ev("calcStarsProbability(calcPeriodo()).state") == "impossible")
+
+    disc_mc = []
+    for i in range(4):
+        disc_mc.append({
+            "id": f"m{i}", "nome": f"M{i}",
+            "ap1": {"value": 36, "expectativa": False},
+            "ap2": {"value": None, "expectativa": False},
+            "as": {"value": None, "expectativa": False, "taken": False},
+            "acs": [], "acMode": "custom", "showAS": False, "asAutoTriggered": False,
+        })
+    fix_mc = {"v": 2, "gender": "m", "foco": "stars", "disciplinas": disc_mc,
+              "tp": {"value": None, "expectativa": False, "applyTo": None}, "recentes": []}
+    h.set_state(fix_mc)
+    prob = h.ev("calcStarsProbability(calcPeriodo())")
+    check("prob state computed", prob and prob.get("state") == "computed",
+          json.dumps(prob)[:120] if prob else "None")
+    check("pct plausível para rendimento 90%",
+          prob and 20 < prob.get("pct", -1) < 100, str(prob.get("pct") if prob else None))
+    p1 = h.ev("renderHome(), document.getElementById('prob-pct').textContent")
+    p2 = h.ev("renderHome(), document.getElementById('prob-pct').textContent")
+    check("pct estável entre re-renders (seed determinístico)",
+          p1 == p2 and p1 not in ("—", ""), f"{p1!r} vs {p2!r}")
+    inv = h.ev("(function(){const p = calcPeriodo(); const s = remainingSlots();"
+               "return Math.abs(s.reduce((a, x) => a + x.max, 0) - (p.total - p.distReg)) < 1e-9})()")
+    check("invariante Σslots = total − distReg", inv)
+    check("faixa credível exibida no card",
+          "–" in (h.ev("document.getElementById('prob-proj').textContent") or ""))
+
+    # 14. B8: nota de PREVISÃO não trava o "garantido"
+    disc_prev = []
+    for i in range(4):
+        disc_prev.append({
+            "id": f"p{i}", "nome": f"D{i}",
+            "ap1": {"value": 40, "expectativa": True},
+            "ap2": {"value": 40, "expectativa": True},
+            "as": {"value": None, "expectativa": False, "taken": False},
+            "acs": [{"id": f"pa{i}", "nome": "ac", "valor": 20, "value": 20,
+                      "expectativa": True, "delivered": None}],
+            "acMode": "custom", "showAS": False, "asAutoTriggered": False,
+        })
+    fix_prev = {"v": 2, "gender": "m", "foco": "stars", "disciplinas": disc_prev,
+                "tp": {"value": None, "expectativa": False, "applyTo": None}, "recentes": []}
+    h.set_state(fix_prev)
+    check("previsão total 400/360 mas NÃO garante",
+          h.ev("document.getElementById('stars-status').textContent") == "Em progresso")
+    check("hint pede virar oficial",
+          "virar oficial" in (h.ev("document.getElementById('stars-hint').textContent") or ""))
+    prob_prev = h.ev("calcStarsProbability(calcPeriodo())")
+    check("prob 100% projetada sem lock",
+          prob_prev.get("state") == "computed" and prob_prev.get("pct") == 100,
+          json.dumps(prob_prev)[:120])
+
+    # 15. AS oficial elimina
+    import copy
+    fix_as = copy.deepcopy(FIX_V2)
+    fix_as["disciplinas"][3]["as"] = {"value": 30, "expectativa": False, "taken": True}
+    h.set_state(fix_as)
+    check("AS oficial → Fora do Stars",
+          h.ev("document.getElementById('stars-status').textContent") == "Fora do Stars")
+    check("prob state out",
+          h.ev("calcStarsProbability(calcPeriodo()).state") == "out")
+
     # console limpo no fim
     check("console sem erros", not h.console, "; ".join(h.console[:5]))
 finally:
