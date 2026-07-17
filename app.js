@@ -4,7 +4,7 @@ const KEY = 'cr9-v1';
 const MAX_RECENTES = 12;
 const MAX_LANCAMENTOS = 500;
 // Bumpar junto com CACHE_NAME do sw.js a cada deploy.
-const APP_VERSION = 'v16';
+const APP_VERSION = 'v17';
 
 // Regras Ibmec/Stars: disciplina = AP1(40) + AP2(40) + pool de AC(20);
 // aprovação aos 70/100; Stars = média 9,0 (90 pts/disciplina) com ≥4
