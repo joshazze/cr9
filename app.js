@@ -2,8 +2,24 @@
 
 const KEY = 'cr9-v1';
 const MAX_RECENTES = 12;
+const MAX_LANCAMENTOS = 500;
 // Bumpar junto com CACHE_NAME do sw.js a cada deploy.
 const APP_VERSION = 'v16';
+
+// Regras Ibmec/Stars: disciplina = AP1(40) + AP2(40) + pool de AC(20);
+// aprovação aos 70/100; Stars = média 9,0 (90 pts/disciplina) com ≥4
+// disciplinas. Displays de estado vazio assumem 5 disciplinas (450/500).
+const AP_MAX = 40;
+const AC_POOL = 20;
+const DISC_TOTAL = 100;
+const APROVACAO_MIN = 70;
+const STARS_POR_DISC = 90;
+const STARS_MIN_DISC = 4;
+const EMPTY_STARS_DEN = 5 * STARS_POR_DISC;
+const EMPTY_TOTAL_DEN = 5 * DISC_TOTAL;
+// Prior do rendimento na probabilidade Stars: Beta(7,3) ≈ aluno de 70%.
+const BETA_PRIOR_A = 7;
+const BETA_PRIOR_B = 3;
 
 // ───────── HELPERS ─────────
 
@@ -400,8 +416,6 @@ function per() {
   return p;
 }
 
-const MAX_LANCAMENTOS = 500;
-
 // Série temporal append-only do período (fonte de tendência/forma/progressão).
 function pushLancamento(entry) {
   const p = per();
@@ -461,7 +475,7 @@ function calcDisc(d, ov = {}) {
   let acEarned = 0, acDist = 0;
   if (acMode === 'equal') {
     const nAcs = d.acs.length;
-    const share = nAcs > 0 ? 20 / nAcs : 0;
+    const share = nAcs > 0 ? AC_POOL / nAcs : 0;
     d.acs.forEach(ac => {
       const deliv = ov.acs && ov.acs[ac.id] !== undefined ? ov.acs[ac.id] : ac.delivered;
       if (deliv === true || deliv === false) {
@@ -488,8 +502,8 @@ function calcDisc(d, ov = {}) {
   const earned = (ap1F !== null && ap1F !== undefined ? ap1F : 0)
                + (ap2F !== null && ap2F !== undefined ? ap2F : 0)
                + acEarned;
-  const dist = (ap1F !== null && ap1F !== undefined ? 40 : 0)
-             + (ap2F !== null && ap2F !== undefined ? 40 : 0)
+  const dist = (ap1F !== null && ap1F !== undefined ? AP_MAX : 0)
+             + (ap2F !== null && ap2F !== undefined ? AP_MAX : 0)
              + acDist;
 
   return {
@@ -504,8 +518,8 @@ function calcDisc(d, ov = {}) {
 
 function calcPeriodo(sim = {}, periodo = per()) {
   const n = periodo.disciplinas.length;
-  const total = n * 100;
-  const starsNeeded = n * 90;
+  const total = n * DISC_TOTAL;
+  const starsNeeded = n * STARS_POR_DISC;
   let earnedReg = 0, distReg = 0, anyAS = false;
 
   periodo.disciplinas.forEach(d => {
@@ -531,7 +545,7 @@ function calcPeriodo(sim = {}, periodo = per()) {
 
   const aprov = distReg > 0 ? (earnedReg / distReg) * 100 : null;
   const totalScore = earnedReg + tpBonus;
-  const enrolledOk = n >= 4;
+  const enrolledOk = n >= STARS_MIN_DISC;
   const starsEligible = !anyAS && enrolledOk;
   const starsProgress = starsNeeded > 0
     ? Math.min(totalScore / starsNeeded, 1) * 100
@@ -705,7 +719,7 @@ let mcMemo = null;
 function calcStarsProbability(p, periodo = per()) {
   if (p.n === 0) return { state: 'empty' };
   if (p.anyAS) return { state: 'out' };
-  if (!p.enrolledOk) return { state: 'insufficient', falta: 4 - p.n };
+  if (!p.enrolledOk) return { state: 'insufficient', falta: STARS_MIN_DISC - p.n };
   if (p.distReg === 0) return { state: 'nodata' };
 
   const remaining = Math.max(0, p.total - p.distReg);
@@ -721,8 +735,8 @@ function calcStarsProbability(p, periodo = per()) {
   }
 
   const slots = remainingSlots(periodo);
-  const alpha = 7 + p.earnedReg;
-  const beta = 3 + (p.distReg - p.earnedReg);
+  const alpha = BETA_PRIOR_A + p.earnedReg;
+  const beta = BETA_PRIOR_B + (p.distReg - p.earnedReg);
   const seed = CR9Math.fnv1a(JSON.stringify([
     periodo.id,
     Math.round(p.earnedReg * 100),
@@ -1003,7 +1017,7 @@ function renderHomeStars() {
   const hintEl = document.getElementById('stars-hint');
 
   numEl.textContent = p.n === 0 ? '0' : String(Math.round(p.totalScore));
-  denEl.textContent = '/ ' + (p.n === 0 ? 450 : p.starsNeeded);
+  denEl.textContent = '/ ' + (p.n === 0 ? EMPTY_STARS_DEN : p.starsNeeded);
 
   // SVG ring animation via pathLength
   const offset = 100 - p.starsProgress;
@@ -1049,7 +1063,7 @@ function renderHomeStars() {
 
   // Pontos distribuídos
   document.getElementById('pts-dist').textContent = fmtNum(p.distReg, 1);
-  document.getElementById('pts-total').textContent = p.total || 500;
+  document.getElementById('pts-total').textContent = p.total || EMPTY_TOTAL_DEN;
   const distPct = p.total > 0 ? (p.distReg / p.total) * 100 : 0;
   document.getElementById('dist-pct').innerHTML =
     fmtNum(distPct, 0) + '<span class="dist-pct-sym">%</span>';
@@ -1121,26 +1135,48 @@ function renderHomeStars() {
   }
 
   // Recentes
-  const lista = document.getElementById('lista-recentes');
+  renderRecentesList(document.getElementById('lista-recentes'));
+}
+
+// Lista de lançamentos recentes — compartilhada entre home stars e registro.
+function renderRecentesList(el) {
+  if (!el) return;
   if (!per().recentes || per().recentes.length === 0) {
-    lista.innerHTML = '<li class="empty">nenhum lançamento ainda</li>';
-  } else {
-    lista.innerHTML = per().recentes.map(r => {
-      const exp = r.kind === 'expectativa';
-      const badge = exp ? '<span class="badge-exp">prev</span>' : '';
-      const maxStr = r.max ? '<span class="rec-val-max"> / ' + fmtNum(r.max, 1) + '</span>' : '';
-      return '<li class="rec-item' + (exp ? ' exp' : '') + '">'
-        + '<div class="rec-body">'
-        + '<div class="rec-disc">' + escapeHTML(r.discNome || '—') + ' ' + badge + '</div>'
-        + '<div class="rec-tipo">' + escapeHTML(r.label || '') + '</div>'
-        + '</div>'
-        + '<div class="rec-val">' + fmtNum(r.valor, 2) + maxStr + '</div>'
-        + '</li>';
-    }).join('');
+    el.innerHTML = '<li class="empty">nenhum lançamento ainda</li>';
+    return;
   }
+  el.innerHTML = per().recentes.map(r => {
+    const exp = r.kind === 'expectativa';
+    const badge = exp ? '<span class="badge-exp">prev</span>' : '';
+    const maxStr = r.max ? '<span class="rec-val-max"> / ' + fmtNum(r.max, 1) + '</span>' : '';
+    return '<li class="rec-item' + (exp ? ' exp' : '') + '">'
+      + '<div class="rec-body">'
+      + '<div class="rec-disc">' + escapeHTML(r.discNome || '—') + ' ' + badge + '</div>'
+      + '<div class="rec-tipo">' + escapeHTML(r.label || '') + '</div>'
+      + '</div>'
+      + '<div class="rec-val">' + fmtNum(r.valor, 2) + maxStr + '</div>'
+      + '</li>';
+  }).join('');
 }
 
 // ───────── RENDER: HOME TRACKING ─────────
+
+// Acumulado da série de eventos ({pts}) — base da timeline e da progressão.
+function cumsum(eventos) {
+  const cum = [];
+  let acc = 0;
+  eventos.forEach(ev => { acc += ev.pts; cum.push(acc); });
+  return cum;
+}
+
+// Série → coordenadas SVG (strings já com .toFixed(1), prontas pra polyline).
+function svgCoords(values, w, h, pad, maxV) {
+  const stepX = (w - pad * 2) / Math.max(1, values.length - 1);
+  return values.map((v, i) => ({
+    x: (pad + i * stepX).toFixed(1),
+    y: (h - pad - (v / maxV) * (h - pad * 2)).toFixed(1)
+  }));
+}
 
 function renderHomeTracking() {
   const p = calcPeriodo();
@@ -1149,7 +1185,7 @@ function renderHomeTracking() {
   const kpis = document.getElementById('track-kpis');
   if (kpis) {
     const aprovTxt = p.aprov !== null ? fmtNum(p.aprov, 1) + '%' : '—';
-    const projTxt = fmtNum(p.totalScore, 0) + ' / ' + (p.starsNeeded || 450);
+    const projTxt = fmtNum(p.totalScore, 0) + ' / ' + (p.starsNeeded || EMPTY_STARS_DEN);
     kpis.innerHTML = ''
       + '<div class="track-kpi"><div class="track-kpi-label">aproveitamento</div><div class="track-kpi-value">' + aprovTxt + '</div></div>'
       + '<div class="track-kpi"><div class="track-kpi-label">ganhos / lançados</div><div class="track-kpi-value">' + fmtNum(p.earnedReg, 0) + ' / ' + fmtNum(p.distReg, 0) + '</div></div>'
@@ -1246,21 +1282,11 @@ function renderHomeTracking() {
       tl.innerHTML = '<p class="hint">sem lançamentos pra plotar</p>';
     } else {
       const w = 320, h = 80, pad = 6;
-      const cum = [];
-      let acc = 0;
-      eventos.forEach(ev => { acc += ev.pts; cum.push(acc); });
+      const cum = cumsum(eventos);
       const maxV = Math.max.apply(null, cum) || 1;
-      const stepX = (w - pad * 2) / Math.max(1, cum.length - 1);
-      const pts = cum.map((v, i) => {
-        const x = pad + i * stepX;
-        const y = h - pad - (v / maxV) * (h - pad * 2);
-        return x.toFixed(1) + ',' + y.toFixed(1);
-      });
-      const dots = cum.map((v, i) => {
-        const x = pad + i * stepX;
-        const y = h - pad - (v / maxV) * (h - pad * 2);
-        return '<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="2.5"/>';
-      }).join('');
+      const coords = svgCoords(cum, w, h, pad, maxV);
+      const pts = coords.map(c => c.x + ',' + c.y);
+      const dots = coords.map(c => '<circle cx="' + c.x + '" cy="' + c.y + '" r="2.5"/>').join('');
       tl.innerHTML = '<svg class="track-svg" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="xMidYMid meet">'
         + '<polyline points="' + pts.join(' ') + '" fill="none" stroke="currentColor" stroke-width="1.5"/>'
         + dots
@@ -1318,18 +1344,12 @@ function renderHomeTracking() {
       pr.innerHTML = '<p class="hint">sem dados de progressão</p>';
     } else {
       const w = 320, h = 100, pad = 8;
-      const cum = [];
-      let acc = 0;
-      eventos.forEach(ev => { acc += ev.pts; cum.push(acc); });
-      const need = p.starsNeeded || 450;
+      const cum = cumsum(eventos);
+      const need = p.starsNeeded || EMPTY_STARS_DEN;
       const maxV = Math.max(need, cum[cum.length - 1] || 1);
-      const stepX = (w - pad * 2) / Math.max(1, cum.length - 1);
-      const pts = cum.map((v, i) => {
-        const x = pad + i * stepX;
-        const y = h - pad - (v / maxV) * (h - pad * 2);
-        return x.toFixed(1) + ',' + y.toFixed(1);
-      });
-      const areaPts = [pad + ',' + (h - pad)].concat(pts).concat([(pad + (cum.length - 1) * stepX).toFixed(1) + ',' + (h - pad)]);
+      const coords = svgCoords(cum, w, h, pad, maxV);
+      const pts = coords.map(c => c.x + ',' + c.y);
+      const areaPts = [pad + ',' + (h - pad)].concat(pts).concat([coords[coords.length - 1].x + ',' + (h - pad)]);
       const needY = (h - pad - (need / maxV) * (h - pad * 2)).toFixed(1);
       pr.innerHTML = '<svg class="track-svg" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="xMidYMid meet">'
         + '<polygon points="' + areaPts.join(' ') + '" fill="currentColor" fill-opacity="0.18"/>'
@@ -1512,7 +1532,7 @@ function renderHomeRegistro() {
   if (summary) {
     const p = calcPeriodo();
     const pct = p.total > 0 ? Math.round(p.earnedReg / p.total * 100) : 0;
-    const starsOk = p.starsEligible && p.totalOficial >= (p.starsNeeded || 450);
+    const starsOk = p.starsEligible && p.totalOficial >= (p.starsNeeded || EMPTY_STARS_DEN);
     summary.innerHTML = ''
       + '<div class="reg-sum-item"><span class="reg-sum-num">' + fmtNum(p.totalScore, 0) + '</span><span class="reg-sum-lbl">pontos</span></div>'
       + '<div class="reg-sum-item"><span class="reg-sum-num">' + pct + '%</span><span class="reg-sum-lbl">aproveitamento</span></div>'
@@ -1535,25 +1555,7 @@ function renderHomeRegistro() {
   }
 
   // Recentes
-  const lista = document.getElementById('reg-recentes');
-  if (lista) {
-    if (!per().recentes || per().recentes.length === 0) {
-      lista.innerHTML = '<li class="empty">nenhum lançamento ainda</li>';
-    } else {
-      lista.innerHTML = per().recentes.map(r => {
-        const exp = r.kind === 'expectativa';
-        const badge = exp ? '<span class="badge-exp">prev</span>' : '';
-        const maxStr = r.max ? '<span class="rec-val-max"> / ' + fmtNum(r.max, 1) + '</span>' : '';
-        return '<li class="rec-item' + (exp ? ' exp' : '') + '">'
-          + '<div class="rec-body">'
-          + '<div class="rec-disc">' + escapeHTML(r.discNome || '—') + ' ' + badge + '</div>'
-          + '<div class="rec-tipo">' + escapeHTML(r.label || '') + '</div>'
-          + '</div>'
-          + '<div class="rec-val">' + fmtNum(r.valor, 2) + maxStr + '</div>'
-          + '</li>';
-      }).join('');
-    }
-  }
+  renderRecentesList(document.getElementById('reg-recentes'));
 
   // Slim progress per disciplina
   const prog = document.getElementById('reg-progress');
@@ -1797,7 +1799,7 @@ function syncAsAutoTrigger(d) {
   const allGradesAssigned = d.ap1.value !== null && d.ap1.value !== undefined
     && d.ap2.value !== null && d.ap2.value !== undefined
     && acsAssigned;
-  if (allGradesAssigned && !d.asAutoTriggered && calcDisc(d).earned < 70) {
+  if (allGradesAssigned && !d.asAutoTriggered && calcDisc(d).earned < APROVACAO_MIN) {
     d.showAS = true;
     d.asAutoTriggered = true;
   } else if (!allGradesAssigned && d.asAutoTriggered) {
@@ -1873,7 +1875,7 @@ function renderDetalhe() {
   if (d.acs.length === 0) {
     listaAcs.innerHTML = '<li class="empty">nenhuma atividade complementar</li>';
   } else if (acMode === 'equal') {
-    const share = 20 / d.acs.length;
+    const share = AC_POOL / d.acs.length;
     listaAcs.innerHTML = d.acs.map(ac => {
       let cls, label;
       if (ac.delivered === true) { cls = 'delivered'; label = 'entregue'; }
@@ -2116,7 +2118,7 @@ function renderSimDisc(d) {
 function updateSimResult() {
   const p = calcPeriodo(simState);
   document.getElementById('sim-total').textContent = fmtNum(p.totalScore, 0);
-  document.getElementById('sim-max').textContent = p.total || 500;
+  document.getElementById('sim-max').textContent = p.total || EMPTY_TOTAL_DEN;
   const pct = p.total > 0 ? Math.max(0, Math.min(100, (p.totalScore / p.total) * 100)) : 0;
   const bar = document.getElementById('sim-bar');
   bar.style.width = pct + '%';
@@ -2167,6 +2169,26 @@ function openModalInfo(title, bodyHTML) {
   modal.hidden = false;
 }
 
+// Radio-group visual: marca .selected no label clicado (os modais re-injetam o HTML).
+function wireRadioLabels(selector) {
+  document.querySelectorAll(selector).forEach(lbl => {
+    lbl.addEventListener('click', () => {
+      document.querySelectorAll(selector).forEach(l => l.classList.remove('selected'));
+      lbl.classList.add('selected');
+    });
+  });
+}
+
+// Botão "limpar" dos modais: onClear muta e persiste; depois fecha e re-renderiza.
+function wireModalClear(onClear, rerender) {
+  const el = document.getElementById('m-clear');
+  if (el) el.addEventListener('click', () => {
+    onClear();
+    document.getElementById('modal').hidden = true;
+    (rerender || renderDetalhe)();
+  });
+}
+
 // Fechar modal: bind único (elementos estáticos; rebind por abertura vazava listeners)
 document.querySelectorAll('#modal [data-close]').forEach(el => {
   el.addEventListener('click', () => { document.getElementById('modal').hidden = true; });
@@ -2203,7 +2225,7 @@ function openModalGrade(tipo, isExpectativa) {
   const d = per().disciplinas.find(x => x.id === currentDiscId);
   if (!d) return;
   const slot = d[tipo];
-  const max = 40;
+  const max = AP_MAX;
   const kindLabel = isExpectativa ? 'previsão' : 'oficial';
   const labels = { ap1: 'AP1', ap2: 'AP2', as: 'AS' };
 
@@ -2245,14 +2267,11 @@ function openModalGrade(tipo, isExpectativa) {
     }
   );
 
-  const clearEl = document.getElementById('m-clear');
-  if (clearEl) clearEl.addEventListener('click', () => {
+  wireModalClear(() => {
     slot.value = null;
     slot.expectativa = false;
     if (tipo === 'as') slot.taken = false;
     saveDisc(d);
-    document.getElementById('modal').hidden = true;
-    renderDetalhe();
   });
 }
 
@@ -2286,7 +2305,7 @@ function openModalAcGrade(acId) {
 
   const mode = d.acMode || 'custom';
   if (mode === 'equal') {
-    const share = d.acs.length > 0 ? 20 / d.acs.length : 0;
+    const share = d.acs.length > 0 ? AC_POOL / d.acs.length : 0;
     const clearBtn = (ac.delivered === true || ac.delivered === false)
       ? '<button type="button" class="btn sm danger" id="m-clear">limpar status</button>'
       : '';
@@ -2319,18 +2338,10 @@ function openModalAcGrade(acId) {
         return true;
       }
     );
-    document.querySelectorAll('#m-deliv label').forEach(lbl => {
-      lbl.addEventListener('click', () => {
-        document.querySelectorAll('#m-deliv label').forEach(l => l.classList.remove('selected'));
-        lbl.classList.add('selected');
-      });
-    });
-    const clearElEq = document.getElementById('m-clear');
-    if (clearElEq) clearElEq.addEventListener('click', () => {
+    wireRadioLabels('#m-deliv label');
+    wireModalClear(() => {
       ac.delivered = null;
       saveDisc(d);
-      document.getElementById('modal').hidden = true;
-      renderDetalhe();
     });
     return;
   }
@@ -2375,20 +2386,12 @@ function openModalAcGrade(acId) {
     }
   );
 
-  document.querySelectorAll('#m-kind label').forEach(lbl => {
-    lbl.addEventListener('click', () => {
-      document.querySelectorAll('#m-kind label').forEach(l => l.classList.remove('selected'));
-      lbl.classList.add('selected');
-    });
-  });
+  wireRadioLabels('#m-kind label');
 
-  const clearEl = document.getElementById('m-clear');
-  if (clearEl) clearEl.addEventListener('click', () => {
+  wireModalClear(() => {
     ac.value = null;
     ac.expectativa = false;
     saveDisc(d);
-    document.getElementById('modal').hidden = true;
-    renderDetalhe();
   });
 }
 
@@ -2399,7 +2402,7 @@ function openModalAddAc() {
 
   if (mode === 'equal') {
     const nAfter = d.acs.length + 1;
-    const shareAfter = 20 / nAfter;
+    const shareAfter = AC_POOL / nAfter;
     openModal(
       'nova atividade (AC)',
       '<label>nome'
@@ -2419,7 +2422,7 @@ function openModalAddAc() {
   }
 
   const usado = d.acs.reduce((s, a) => s + a.valor, 0);
-  const restante = Math.max(0, 20 - usado);
+  const restante = Math.max(0, AC_POOL - usado);
 
   openModal(
     'nova atividade (AC)',
@@ -2494,20 +2497,12 @@ function openModalTP() {
     }
   );
 
-  document.querySelectorAll('#m-kind label').forEach(lbl => {
-    lbl.addEventListener('click', () => {
-      document.querySelectorAll('#m-kind label').forEach(l => l.classList.remove('selected'));
-      lbl.classList.add('selected');
-    });
-  });
+  wireRadioLabels('#m-kind label');
 
-  const clearEl = document.getElementById('m-clear');
-  if (clearEl) clearEl.addEventListener('click', () => {
+  wireModalClear(() => {
     per().tp = { value: null, expectativa: false, applyTo: null };
     saveState();
-    document.getElementById('modal').hidden = true;
-    renderHome();
-  });
+  }, renderHome);
 }
 
 // ───────── BINDINGS ─────────
