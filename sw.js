@@ -27,15 +27,6 @@ self.addEventListener('activate', (event) => {
         keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
       ))
       .then(() => self.clients.claim())
-      .then(() => self.clients.matchAll({ type: 'window' }))
-      .then((clients) => {
-        // Força reload de clientes já abertos pra pegar o novo código.
-        // Necessário especialmente na transição do SW antigo (cache-first) pra esse novo (network-first),
-        // já que o app.js antigo não tem listener de controllerchange.
-        clients.forEach((client) => {
-          if ('navigate' in client) client.navigate(client.url).catch(() => {});
-        });
-      })
   );
 });
 

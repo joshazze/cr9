@@ -702,7 +702,7 @@ function renderDetInsights(d) {
 // restantes. Estados especiais decididos antes da simulação; "garantido"
 // exige pontos OFICIAIS (previsão não trava).
 let mcMemo = null;
-function calcStarsProbability(p) {
+function calcStarsProbability(p, periodo = per()) {
   if (p.n === 0) return { state: 'empty' };
   if (p.anyAS) return { state: 'out' };
   if (!p.enrolledOk) return { state: 'insufficient', falta: 4 - p.n };
@@ -720,11 +720,11 @@ function calcStarsProbability(p) {
     return { state: 'impossible', remaining, need, rate, projected: maxPossible };
   }
 
-  const slots = remainingSlots();
+  const slots = remainingSlots(periodo);
   const alpha = 7 + p.earnedReg;
   const beta = 3 + (p.distReg - p.earnedReg);
   const seed = CR9Math.fnv1a(JSON.stringify([
-    per().id,
+    periodo.id,
     Math.round(p.earnedReg * 100),
     Math.round(p.distReg * 100),
     p.starsNeeded,
@@ -1786,6 +1786,30 @@ function gradeActions(tipo) {
     + '</div>';
 }
 
+// Auto-trigger da AS: com todas as notas lançadas e earned < 70, liga showAS
+// uma vez; limpar alguma nota re-arma o gatilho. Roda nas mutações de nota/AC
+// via saveDisc — nunca no render, que precisa ficar puro (sem write em disco).
+function syncAsAutoTrigger(d) {
+  const acsAssigned = (d.acs || []).every(ac => {
+    if ((d.acMode || 'custom') === 'equal') return ac.delivered === true || ac.delivered === false;
+    return ac.value !== null && ac.value !== undefined;
+  });
+  const allGradesAssigned = d.ap1.value !== null && d.ap1.value !== undefined
+    && d.ap2.value !== null && d.ap2.value !== undefined
+    && acsAssigned;
+  if (allGradesAssigned && !d.asAutoTriggered && calcDisc(d).earned < 70) {
+    d.showAS = true;
+    d.asAutoTriggered = true;
+  } else if (!allGradesAssigned && d.asAutoTriggered) {
+    d.asAutoTriggered = false;
+  }
+}
+
+function saveDisc(d) {
+  syncAsAutoTrigger(d);
+  saveState();
+}
+
 function renderDetalhe() {
   const d = per().disciplinas.find(x => x.id === currentDiscId);
   if (!d) { goto('s-disciplinas'); return; }
@@ -1813,29 +1837,11 @@ function renderDetalhe() {
 
   renderDetInsights(d);
 
-  const acsAssigned = (d.acs || []).every(ac => {
-    if ((d.acMode || 'custom') === 'equal') return ac.delivered === true || ac.delivered === false;
-    return ac.value !== null && ac.value !== undefined;
-  });
-  const allGradesAssigned = d.ap1.value !== null && d.ap1.value !== undefined
-    && d.ap2.value !== null && d.ap2.value !== undefined
-    && acsAssigned;
-  if (allGradesAssigned && r.earned < 70 && !d.asAutoTriggered) {
-    d.showAS = true;
-    d.asAutoTriggered = true;
-    saveState();
-  } else if (!allGradesAssigned && d.asAutoTriggered) {
-    d.asAutoTriggered = false;
-    saveState();
-  }
-
   const chk = document.getElementById('chk-show-as');
-  const toggleRow = document.getElementById('det-as-toggle');
-  if (chk) chk.checked = d.showAS === true;
-  if (toggleRow) {
-    toggleRow.onclick = (e) => {
-      e.preventDefault();
-      d.showAS = !d.showAS;
+  if (chk) {
+    chk.checked = d.showAS === true;
+    chk.onchange = () => {
+      d.showAS = chk.checked;
       saveState();
       renderDetalhe();
     };
@@ -1912,7 +1918,7 @@ function renderDetalhe() {
           if (simState.disc && simState.disc[d.id] && simState.disc[d.id].acs) {
             delete simState.disc[d.id].acs[acDelId];
           }
-          saveState();
+          saveDisc(d);
           renderDetalhe();
         }
       });
@@ -2111,7 +2117,7 @@ function updateSimResult() {
   const p = calcPeriodo(simState);
   document.getElementById('sim-total').textContent = fmtNum(p.totalScore, 0);
   document.getElementById('sim-max').textContent = p.total || 500;
-  const pct = p.total > 0 ? (p.totalScore / p.total) * 100 : 0;
+  const pct = p.total > 0 ? Math.max(0, Math.min(100, (p.totalScore / p.total) * 100)) : 0;
   const bar = document.getElementById('sim-bar');
   bar.style.width = pct + '%';
   const hint = document.getElementById('sim-hint');
@@ -2233,7 +2239,7 @@ function openModalGrade(tipo, isExpectativa) {
         max,
         kind: isExpectativa ? 'expectativa' : 'oficial'
       });
-      saveState();
+      saveDisc(d);
       renderDetalhe();
       return true;
     }
@@ -2244,7 +2250,7 @@ function openModalGrade(tipo, isExpectativa) {
     slot.value = null;
     slot.expectativa = false;
     if (tipo === 'as') slot.taken = false;
-    saveState();
+    saveDisc(d);
     document.getElementById('modal').hidden = true;
     renderDetalhe();
   });
@@ -2268,7 +2274,7 @@ function setAcMode(mode) {
     });
   }
   d.acMode = mode;
-  saveState();
+  saveDisc(d);
   renderDetalhe();
 }
 
@@ -2308,7 +2314,7 @@ function openModalAcGrade(acId) {
           max: share,
           kind: 'oficial'
         });
-        saveState();
+        saveDisc(d);
         renderDetalhe();
         return true;
       }
@@ -2322,7 +2328,7 @@ function openModalAcGrade(acId) {
     const clearElEq = document.getElementById('m-clear');
     if (clearElEq) clearElEq.addEventListener('click', () => {
       ac.delivered = null;
-      saveState();
+      saveDisc(d);
       document.getElementById('modal').hidden = true;
       renderDetalhe();
     });
@@ -2363,7 +2369,7 @@ function openModalAcGrade(acId) {
         max: ac.valor,
         kind
       });
-      saveState();
+      saveDisc(d);
       renderDetalhe();
       return true;
     }
@@ -2380,7 +2386,7 @@ function openModalAcGrade(acId) {
   if (clearEl) clearEl.addEventListener('click', () => {
     ac.value = null;
     ac.expectativa = false;
-    saveState();
+    saveDisc(d);
     document.getElementById('modal').hidden = true;
     renderDetalhe();
   });
@@ -2404,7 +2410,7 @@ function openModalAddAc() {
         const nome = document.getElementById('m-nome').value.trim();
         if (!nome) { alert('Nome obrigatório'); return false; }
         d.acs.push({ id: uid(), nome, valor: 0, value: null, expectativa: false, delivered: null });
-        saveState();
+        saveDisc(d);
         renderDetalhe();
         return true;
       }
@@ -2434,7 +2440,7 @@ function openModalAddAc() {
         return false;
       }
       d.acs.push({ id: uid(), nome, valor, value: null, expectativa: false, delivered: null });
-      saveState();
+      saveDisc(d);
       renderDetalhe();
       return true;
     }
