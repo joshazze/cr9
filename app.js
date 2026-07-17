@@ -1180,7 +1180,26 @@ function svgCoords(values, w, h, pad, maxV) {
 
 function renderHomeTracking() {
   const p = calcPeriodo();
+  const aprov = p.aprov || 0;
 
+  renderTrackKpis(p);
+  renderTrackTendencia();
+  renderTrackForma();
+  renderTrackExpVsOficial();
+  renderTrackTimeline();
+  renderTrackAproveitamento();
+  renderTrackConsistencia();
+  renderTrackProgressao(p);
+  renderTrackHistorico();
+  renderTrackTP();
+  renderTrackVsMedio(aprov);
+  renderTrackProfs();
+  renderTrackVsEinstein(aprov);
+  renderTrackDesespero(p, aprov);
+  renderTrackSobreviver(p, aprov);
+}
+
+function renderTrackKpis(p) {
   // KPI strip
   const kpis = document.getElementById('track-kpis');
   if (kpis) {
@@ -1191,7 +1210,9 @@ function renderHomeTracking() {
       + '<div class="track-kpi"><div class="track-kpi-label">ganhos / lançados</div><div class="track-kpi-value">' + fmtNum(p.earnedReg, 0) + ' / ' + fmtNum(p.distReg, 0) + '</div></div>'
       + '<div class="track-kpi"><div class="track-kpi-label">projeção stars</div><div class="track-kpi-value">' + projTxt + '</div></div>';
   }
+}
 
+function renderTrackTendencia() {
   // Tendência (regressão linear sobre a série de rendimento oficial)
   const tend = document.getElementById('track-tendencia');
   if (tend) {
@@ -1224,7 +1245,9 @@ function renderHomeTracking() {
         + porDisc;
     }
   }
+}
 
+function renderTrackForma() {
   // Forma atual (EWMA dos últimos lançamentos vs média do período)
   const forma = document.getElementById('track-forma');
   if (forma) {
@@ -1252,7 +1275,9 @@ function renderHomeTracking() {
         + '</div>';
     }
   }
+}
 
+function renderTrackExpVsOficial() {
   // Expectativa vs Oficial
   const evo = document.getElementById('track-exp-vs-of');
   if (evo) {
@@ -1272,7 +1297,9 @@ function renderHomeTracking() {
       }).join('');
     }
   }
+}
 
+function renderTrackTimeline() {
   // Timeline SVG sparkline — pontos REAIS acumulados (série deduplicada;
   // edição substitui, TP entra pelo bônus)
   const tl = document.getElementById('track-timeline');
@@ -1293,7 +1320,9 @@ function renderHomeTracking() {
         + '</svg>';
     }
   }
+}
 
+function renderTrackAproveitamento() {
   // Aproveitamento per disciplina
   const apr = document.getElementById('track-aprov-list');
   if (apr) {
@@ -1316,7 +1345,9 @@ function renderHomeTracking() {
       ).join('');
     }
   }
+}
 
+function renderTrackConsistencia() {
   // Consistência por disciplina (CV das notas normalizadas — estático)
   const cons = document.getElementById('track-consistencia');
   if (cons) {
@@ -1335,7 +1366,9 @@ function renderHomeTracking() {
         + '<p class="track-fun-hint">cv = desvio ÷ média das notas normalizadas. quanto menor, mais previsível.</p>';
     }
   }
+}
 
+function renderTrackProgressao(p) {
   // Progressão SVG — pontos reais acumulados rumo à meta do Stars
   const pr = document.getElementById('track-progress');
   if (pr) {
@@ -1359,7 +1392,9 @@ function renderHomeTracking() {
         + '</svg>';
     }
   }
+}
 
+function renderTrackHistorico() {
   // Evolução entre períodos (aparece só com 2+)
   const hist = document.getElementById('track-historico');
   const histCard = document.getElementById('card-historico');
@@ -1415,7 +1450,9 @@ function renderHomeTracking() {
       }
     }
   }
+}
 
+function renderTrackTP() {
   // TP contribution
   const tpEl = document.getElementById('track-tp');
   if (tpEl) {
@@ -1428,11 +1465,9 @@ function renderHomeTracking() {
         + '<div class="track-tp-line muted">nota bruta ' + fmtNum(per().tp.value, 3) + '</div>';
     }
   }
+}
 
-  // ── Fun charts ──
-
-  const aprov = p.aprov || 0;
-
+function renderTrackVsMedio(aprov) {
   // Você vs Aluno Médio
   const vsm = document.getElementById('track-vs-medio');
   if (vsm) {
@@ -1444,7 +1479,9 @@ function renderHomeTracking() {
       + '</div>'
       + '<p class="track-fun-hint">' + (you > medio ? 'acima da média. orgulho.' : you === medio ? 'na média certinha. estável.' : 'abaixo da média... bora reagir.') + '</p>';
   }
+}
 
+function renderTrackProfs() {
   // Seus professores gostam de você?
   const profs = document.getElementById('track-profs');
   if (profs) {
@@ -1465,7 +1502,9 @@ function renderHomeTracking() {
       }).join('');
     }
   }
+}
 
+function renderTrackVsEinstein(aprov) {
   // Você vs Einstein
   const vse = document.getElementById('track-vs-einstein');
   if (vse) {
@@ -1478,7 +1517,9 @@ function renderHomeTracking() {
       + '</div>'
       + '<p class="track-fun-hint">' + (diff <= 0 ? 'calma aí, gênio. superou o Einstein.' : diff <= 10 ? 'quase lá. falta pouco pro Nobel.' : diff <= 25 ? 'respeitável, mas Einstein ainda ganha.' : 'Einstein tá rindo de você.') + '</p>';
   }
+}
 
+function renderTrackDesespero(p, aprov) {
   // Nível de desespero
   const desp = document.getElementById('track-desespero');
   if (desp) {
@@ -1497,7 +1538,9 @@ function renderHomeTracking() {
       + '<div class="track-bar"><div class="track-bar-desp" style="width:' + bar + '%"></div></div>'
       + '</div>';
   }
+}
 
+function renderTrackSobreviver(p, aprov) {
   // Chance de sobreviver ao período
   const sob = document.getElementById('track-sobreviver');
   if (sob) {
