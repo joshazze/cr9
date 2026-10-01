@@ -210,6 +210,22 @@ try:
     check("select do TP mostra nota atual", "/100" in txt(h, "#m-disc"), txt(h, "#m-disc")[:120])
     h.ev("document.getElementById('modal').hidden = true")
 
+    # 12b. TP verde: pílula dentro das barras de nota + nomes na barra de distribuídos
+    h.set_state(FIX_V2)
+    h.ev("state.foco = 'stars'; goto('s-home')")
+    check("pílula TP no detalhamento", h.ev("document.querySelectorAll('#bd-body .tp-pill').length") == 1)
+    check("pílula TP nos distribuídos", h.ev("document.querySelectorAll('#seg-dist .tp-pill').length") == 1)
+    check("nomes na barra de distribuídos",
+          h.ev("Array.from(document.querySelectorAll('#seg-dist .seg-name')).map(e => e.textContent).join()") == "POO,ED,EST,PPS")
+    check("badge do TP é verde (classe tp)", h.ev("!!document.querySelector('#bd-body .tp-badge.tp')"))
+    left = h.ev("parseFloat(document.querySelector('#bd-body .tp-pill').style.left)")
+    width = h.ev("parseFloat(document.querySelector('#bd-body .tp-pill').style.width)")
+    check("pílula ocupa o fim da nota (68,5 → 75,5)", abs(left - 68.5) < 1e-6 and abs(width - 7) < 1e-6, f"{left} {width}")
+    h.ev("openDetalhe('d1')")
+    check("pílula TP na barra do detalhe", h.ev("!!document.querySelector('#s-detalhe .bar .tp-pill')"))
+    h.ev("openDetalhe('d2')")
+    check("sem TP, sem pílula no detalhe", not h.ev("!!document.querySelector('#s-detalhe .bar .tp-pill')"))
+
     # 13. navega tudo sem exception
     for tela in ["s-disciplinas", "s-simulador", "s-config", "s-home"]:
         h.ev(f"goto('{tela}')")

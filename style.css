@@ -2572,10 +2572,42 @@ header::before {
 [hidden] { display: none !important; }
 .tp-badge { white-space: nowrap; }
 .hdr-det-actions { display: flex; gap: 8px; flex-shrink: 0; }
-.tp-badge.extra {
-  background: var(--success-soft);
-  color: var(--success);
+/* TP = verde veneno: badge e pílula dentro de toda barra de nota */
+:root { --tp: #34d400; --tp-dim: #26a800; --tp-ink: #1b6f00; --tp-soft: #e2f8d3; }
+@media (prefers-color-scheme: dark) {
+  :root { --tp: #7dff2f; --tp-dim: #5be012; --tp-ink: #a6ff74; --tp-soft: rgba(125, 255, 47, 0.14); }
 }
+.tp-badge.tp {
+  background: var(--tp-soft);
+  color: var(--tp-ink);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--tp) 45%, transparent);
+}
+.bar, .reg-bar, .track-bar { position: relative; }
+.tp-pill {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  min-width: 4px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, var(--tp) 0%, var(--tp-dim) 100%);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--tp) 60%, transparent);
+  transition: left 0.7s cubic-bezier(.4,0,.2,1), width 0.7s cubic-bezier(.4,0,.2,1);
+  pointer-events: none;
+}
+.reg-bar .tp-pill, .bar .tp-pill { top: 1px; bottom: 1px; }
+.seg-bar { height: auto; align-items: flex-start; }
+.seg-col { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.seg-col .seg { height: 18px; flex: none; }
+.seg-name {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-dim);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.seg-bar-empty { min-height: 18px; }
 .det-proj-row {
   display: flex;
   justify-content: space-between;
@@ -2661,3 +2693,5 @@ header::before {
 .modal-body label.est-check input { min-height: 0; width: 20px; height: 20px; padding: 0; accent-color: var(--accent); }
 .est-check em { display: block; font-style: normal; font-size: 12px; color: var(--text-muted); }
 .est-vazio { margin: 0; font-size: 13px; color: var(--text-muted); }
+#tp-bonus, .track-tp-line strong { color: var(--tp-ink); }
+.sl-dot.tp, .bd-legend .dot.tp { background: var(--tp); box-shadow: 0 0 4px color-mix(in srgb, var(--tp) 60%, transparent); }

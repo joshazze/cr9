@@ -4,7 +4,7 @@ const KEY = 'cr9-v1';
 const MAX_RECENTES = 12;
 const MAX_LANCAMENTOS = 500;
 // Bumpar junto com CACHE_NAME do sw.js a cada deploy.
-const APP_VERSION = 'v19';
+const APP_VERSION = 'v20';
 
 // Regras Ibmec/Stars: disciplina vale 100 pts. Estrutura padrão AP1(40) +
 // AP2(40) + pool de AC(20), mas cada disciplina pode ter a sua (ex.: AT 60 +
@@ -825,7 +825,7 @@ function renderDetInsights(d) {
 
 // Projeção do período pelo modelo hierárquico (CR9Math.starsProbability):
 // rendimento por avaliação com pooling entre disciplinas, prova e AC
-// separadas, disciplinas dos períodos arquivados como evidência (peso 0,5),
+// separadas, disciplinas dos períodos arquivados como evidência (peso cheio),
 // teto de 100 com TP/extras e aprovação ≥70% por disciplina. Seed = hash do
 // input ⇒ determinístico entre re-renders. Memo das últimas 4 entradas.
 const mcMemo = new Map();
@@ -892,10 +892,13 @@ function calcStarsProbability(p, periodo = per()) {
   }
 
   const mc = projecaoPeriodo(periodo);
+  let iPior = 0;
+  mc.perDisc.forEach((pd, i) => { if (pd.pApprov < mc.perDisc[iPior].pApprov) iPior = i; });
   return {
     state: 'computed',
     pct: mc.pct,
     pReprova: mc.pReprova,
+    maisExposta: periodo.disciplinas[iPior] ? periodo.disciplinas[iPior].nome : null,
     rate,
     needRate: remaining > 0 ? (need / remaining) * 100 : 0,
     projected: mc.mean,
@@ -917,9 +920,13 @@ function renderSegBar() {
     const distW = larg(Math.max(r.dist, r.earned), r.total);
     const earnedW = larg(r.earned, r.total);
     const title = escapeHTML(d.nome) + ' — ' + fmtNum(r.earned, 1) + '/' + fmtNum(r.total, 0) + ' pts';
-    return '<div class="seg" title="' + title + '">'
+    return '<div class="seg-col">'
+      + '<div class="seg" title="' + title + '">'
       + '<div class="seg-dist-fill" style="width:' + distW + '%"></div>'
       + '<div class="seg-earned-fill" style="width:' + earnedW + '%"></div>'
+      + tpPill(r)
+      + '</div>'
+      + '<div class="seg-name">' + escapeHTML(d.nome) + '</div>'
       + '</div>';
   }).join('');
 }
@@ -1061,7 +1068,8 @@ function renderProbCard(p) {
     const gap = Math.max(0, prob.needRate - prob.rate);
     hintEl.textContent = 'chance ínfima — precisa subir ' + fmtNum(gap, 0) + ' pts% no rendimento pros ' + fmtNum(prob.remaining, 0) + ' restantes';
   } else if (prob.pReprova >= 5) {
-    hintEl.textContent = fmtNum(prob.pReprova, 0) + '% de chance de alguma disciplina fechar abaixo de 70 (AS elimina) — é o que mais pesa na conta';
+    hintEl.textContent = fmtNum(prob.pReprova, 0) + '% de chance de alguma disciplina fechar abaixo de 70'
+      + (prob.maisExposta ? ' (' + prob.maisExposta + ')' : '');
   } else if (prob.needRate <= prob.rate) {
     hintEl.textContent = 'mantendo seu rendimento, você chega lá — ' + fmtPct(prob.pct) + '% de chance';
   } else {
@@ -1097,10 +1105,18 @@ function larg(v, total) {
   return total > 0 ? Math.max(0, Math.min(100, (v / total) * 100)) : 0;
 }
 
+// Pílula verde do TP dentro da barra de nota: ocupa o trecho [earned − tp,
+// earned] (o fim do preenchimento). `fim` permite ancorar em outro ponto.
+function tpPill(r, fim) {
+  if (!(r.tpBonus > 0)) return '';
+  const end = fim === undefined ? r.earned : fim;
+  return '<div class="tp-pill" style="left:' + larg(end - r.tpBonus, r.total) + '%;width:' + larg(r.tpBonus, r.total) + '%"></div>';
+}
+
 // Badges dos bônus já dentro da nota (TP e extras efetivos, pós-teto).
 function bonusBadges(r, curto) {
   let h = '';
-  if (r.tpBonus > 0) h += ' <span class="tp-badge">+' + fmtNum(r.tpBonus, 1) + (curto ? '' : ' TP') + '</span>';
+  if (r.tpBonus > 0) h += ' <span class="tp-badge tp">+' + fmtNum(r.tpBonus, 1) + (curto ? '' : ' TP') + '</span>';
   if (r.extrasBonus > 0) h += ' <span class="tp-badge extra">+' + fmtNum(r.extrasBonus, 1) + (curto ? '' : ' extra') + '</span>';
   return h;
 }
@@ -1208,6 +1224,8 @@ function renderHomeStars() {
     hintEl.innerHTML = 'pontos oficiais acima da meta, mas alguma disciplina ainda não bateu 70';
   } else if (p.totalScore >= p.starsNeeded) {
     hintEl.innerHTML = 'projeção em <strong>' + Math.round(p.totalScore) + '</strong> — acima da meta, falta virar oficial';
+  } else if (calcStarsProbability(p).state === 'impossible') {
+    hintEl.innerHTML = 'faltam <strong>' + fmtNum(p.starsNeeded - p.totalScore, 1) + '</strong> pontos, mais do que ainda dá pra fazer';
   } else {
     hintEl.innerHTML = 'faltam <strong>' + fmtNum(p.starsNeeded - p.totalScore, 1) + '</strong> pontos — ainda dá';
   }
@@ -1278,6 +1296,7 @@ function renderHomeStars() {
         + '<div class="bd-bar">'
         + '<div class="bd-dist" style="width:' + distW + '%"></div>'
         + '<div class="bd-earned" style="width:' + earnedW + '%"></div>'
+        + tpPill(r)
         + '</div>'
         + '</div>';
     }).join('');
@@ -1441,7 +1460,8 @@ function renderTrackExpVsOficial() {
         const expW = Math.max(0, Math.min(100 - ofW, larg(expExtra, all.total)));
         return '<div class="track-bar-row">'
           + '<div class="track-bar-head"><span>' + escapeHTML(d.nome) + '</span><span>' + fmtNum(of.earned, 0) + ' + ' + fmtNum(expExtra, 0) + '</span></div>'
-          + '<div class="track-bar"><div class="track-bar-of" style="width:' + ofW + '%"></div><div class="track-bar-exp" style="left:' + ofW + '%;width:' + expW + '%"></div></div>'
+          + '<div class="track-bar"><div class="track-bar-of" style="width:' + ofW + '%"></div><div class="track-bar-exp" style="left:' + ofW + '%;width:' + expW + '%"></div>'
+          + (per().tp.expectativa ? tpPill(all) : tpPill(of)) + '</div>'
           + '</div>';
       }).join('');
     }
@@ -1757,7 +1777,7 @@ function renderHomeRegistro() {
         const w = larg(r.earned, r.total);
         return '<div class="reg-row">'
           + '<div class="reg-row-head"><span>' + escapeHTML(d.nome) + bonusBadges(r, true) + '</span><span>' + fmtNum(r.earned, 0) + '/' + fmtNum(r.total, 0) + '</span></div>'
-          + '<div class="reg-bar"><div class="reg-bar-fill" style="width:' + w + '%"></div></div>'
+          + '<div class="reg-bar"><div class="reg-bar-fill" style="width:' + w + '%"></div>' + tpPill(r) + '</div>'
           + '</div>';
       }).join('');
     }
@@ -2067,6 +2087,7 @@ function renderDetalhe() {
   const pct = r.dist > 0 ? (r.earnedBase / r.dist * 100) : 0;
   const detBar = document.getElementById('det-bar');
   detBar.style.width = larg(r.earned, r.total) + '%';
+  document.getElementById('det-bar-tp').outerHTML = tpPill(r).replace('class="tp-pill"', 'class="tp-pill" id="det-bar-tp"') || '<div id="det-bar-tp"></div>';
   if (r.dist === 0) detBar.className = 'bar-fill';
   else if (pct >= 70) detBar.className = 'bar-fill success';
   else if (pct >= 60) detBar.className = 'bar-fill warning';
