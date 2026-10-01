@@ -4,7 +4,7 @@ const KEY = 'cr9-v1';
 const MAX_RECENTES = 12;
 const MAX_LANCAMENTOS = 500;
 // Bumpar junto com CACHE_NAME do sw.js a cada deploy.
-const APP_VERSION = 'v18';
+const APP_VERSION = 'v19';
 
 // Regras Ibmec/Stars: disciplina vale 100 pts. Estrutura padrão AP1(40) +
 // AP2(40) + pool de AC(20), mas cada disciplina pode ter a sua (ex.: AT 60 +
@@ -23,9 +23,8 @@ const EMPTY_TOTAL_DEN = 5 * DISC_TOTAL;
 
 // Estruturas prontas no modal de disciplina (tudo editável depois).
 const PRESETS = {
-  padrao: { label: 'AP1 + AP2 + ACs', provas: [['AP1', 40], ['AP2', 40]], acPool: 20, nAcs: 0 },
-  at: { label: 'AT + 2 ACs', provas: [['AT', 60]], acPool: 40, nAcs: 2 },
-  livre: { label: 'do zero', provas: [['Avaliação 1', 50]], acPool: 50, nAcs: 0 }
+  padrao: { label: 'padrão · AP1 + AP2 + ACs', provas: [['AP1', 40], ['AP2', 40]], acPool: 20, nAcs: 0, temAS: true },
+  livre: { label: 'do zero', provas: [], acPool: 0, nAcs: 0, temAS: false }
 };
 
 // ───────── HELPERS ─────────
@@ -388,6 +387,7 @@ function migrateState(s) {
       d.acs = d.acs.filter(ac => ac && typeof ac === 'object');
       d.acs.forEach(ac => { if (!ac.id) ac.id = uid(); });
       if (d.showAS === undefined) d.showAS = false;
+      if (typeof d.temAS !== 'boolean') d.temAS = true;
       if (d.asAutoTriggered === undefined) d.asAutoTriggered = false;
     });
 
@@ -491,7 +491,9 @@ function discTotal(d) {
 }
 
 // AS é lançada na escala da maior avaliação (40 no padrão, 60 numa AT de 60).
+// 0 = disciplina sem AS (escolha na estrutura): some da tela e do cálculo.
 function asMaxDisc(d) {
+  if (d.temAS === false) return 0;
   return d.provas.reduce((m, pv) => Math.max(m, pv.max || 0), 0);
 }
 
@@ -590,7 +592,7 @@ function calcDisc(d, ov = {}, periodo = per()) {
     extrasBonus: bonus - tpBonus,
     bonusRaw: tpB + exB,
     // hasAS = AS OFICIAL (taken). Previsão não elimina do Stars.
-    hasAS: asTaken === true && hasVal(asv),
+    hasAS: asM > 0 && asTaken === true && hasVal(asv),
     provasF: finais
   };
 }
@@ -1989,6 +1991,7 @@ function syncAsAutoTrigger(d) {
     return hasVal(ac.value);
   });
   const allGradesAssigned = d.provas.every(pv => hasVal(pv.value)) && acsAssigned;
+  if (d.temAS === false) return;
   if (allGradesAssigned && !d.asAutoTriggered && calcDisc(d).earned < APROV_FRAC * discTotal(d)) {
     d.showAS = true;
     d.asAutoTriggered = true;
@@ -2520,14 +2523,17 @@ function openModalEstrutura(d) {
         + '<input type="number" id="m-nacs" step="1" min="0" max="20" value="' + PRESETS.padrao.nAcs + '" placeholder="0">'
         + '</label>'
       : '')
+    + '<label class="est-check"><input type="checkbox" id="m-temas"' + ((novo ? PRESETS.padrao.temAS : d.temAS !== false) ? ' checked' : '') + '>'
+    + '<span>tem AS <em>substitui a avaliação de pior fração</em></span></label>'
     + '<p class="est-soma" id="m-soma"></p>'
-    + '<p class="form-hint">avaliações + pool de AC somam ' + DISC_TOTAL + '. a AS substitui a avaliação de pior fração e é lançada na escala da maior avaliação.</p>',
+    + '<p class="form-hint">avaliações + pool de AC somam ' + DISC_TOTAL + '. a AS é lançada na escala da maior avaliação; sem AS, fechar abaixo de 70 é reprovação direta.</p>',
     () => salvarEstrutura(d, lerLinhas())
   );
 
   const listEl = document.getElementById('m-provas');
   function desenhar() {
-    listEl.innerHTML = linhas.map((l, i) =>
+    listEl.innerHTML = linhas.length ? '' : '<p class="est-vazio">nenhuma avaliação. toque em + avaliação ou use só ACs.</p>';
+    listEl.innerHTML += linhas.map((l, i) =>
       '<div class="est-row" data-i="' + i + '">'
       + '<input type="text" class="est-nome" value="' + escapeHTML(l.nome) + '" aria-label="nome da avaliação">'
       + '<input type="number" class="est-max" step="0.5" min="0.5" max="' + DISC_TOTAL + '" value="' + l.max + '" aria-label="pontos">'
@@ -2577,6 +2583,7 @@ function openModalEstrutura(d) {
     linhas = pr.provas.map(([nome, max]) => ({ id: null, nome, max }));
     document.getElementById('m-acpool').value = pr.acPool;
     document.getElementById('m-nacs').value = pr.nAcs;
+    document.getElementById('m-temas').checked = pr.temAS;
     presetsEl.querySelectorAll('.est-preset').forEach(x => x.classList.toggle('on', x === b));
     desenhar();
   });
@@ -2587,6 +2594,7 @@ function openModalEstrutura(d) {
 function salvarEstrutura(d, linhas) {
   const nome = document.getElementById('m-nome').value.trim();
   const pool = parseFloat(document.getElementById('m-acpool').value) || 0;
+  const temAS = document.getElementById('m-temas').checked;
   if (!nome) { alert('Nome obrigatório'); return false; }
   if (linhas.some(l => !l.nome)) { alert('Toda avaliação precisa de nome.'); return false; }
   if (linhas.some(l => isNaN(l.max) || l.max <= 0)) { alert('Toda avaliação precisa valer mais que 0.'); return false; }
@@ -2613,6 +2621,7 @@ function salvarEstrutura(d, linhas) {
       })),
       acMode: 'custom',
       extras: [],
+      temAS,
       showAS: false,
       asAutoTriggered: false
     });
@@ -2637,6 +2646,10 @@ function salvarEstrutura(d, linhas) {
     alert('As ACs já somam ' + fmtNum(acAlocado, 1) + ' pts, acima do novo pool de ' + fmtNum(pool, 1) + '. Ajuste ou exclua ACs antes.');
     return false;
   }
+  if (!temAS && hasVal(d.as.value)) {
+    alert('Essa disciplina tem AS lançada (' + fmtNum(d.as.value, 1) + '). Limpe a AS antes de tirar a opção.');
+    return false;
+  }
   const novoAsMax = linhas.reduce((m, l) => Math.max(m, l.max), 0);
   if (hasVal(d.as.value) && d.as.value > novoAsMax + 1e-9) {
     alert('A AS lançada (' + fmtNum(d.as.value, 1) + ') passa da nova escala da AS (' + fmtNum(novoAsMax, 1) + '). Limpe a AS antes.');
@@ -2651,6 +2664,8 @@ function salvarEstrutura(d, linhas) {
       : { id: 'pv-' + uid(), nome: l.nome, max: l.max, value: null, expectativa: false };
   });
   d.acPool = pool;
+  d.temAS = temAS;
+  if (!temAS) { d.showAS = false; d.asAutoTriggered = false; }
   if (simState.disc) delete simState.disc[d.id];
   saveDisc(d);
   renderDetalhe();

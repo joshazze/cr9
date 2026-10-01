@@ -60,26 +60,32 @@ try:
     soma = h.ev("per().disciplinas.reduce((s, d) => s + calcDisc(d).earned, 0)")
     check("total do período respeita o teto", abs(total - soma) < 1e-9, f"{total} vs {soma}")
 
-    # 3. nova disciplina pelo modal com preset AT + 2 ACs
+    # 3. nova disciplina "do zero" montada à mão: AT 60 + pool 40 com 2 ACs
     h.set_state(FIX_V2)
     h.ev("window.prompt = (m, d) => d; window.confirm = () => true;"
          "window.__alerts = []; window.alert = m => window.__alerts.push(m)")
     h.ev("goto('s-disciplinas'); document.getElementById('btn-add-disc').click()")
+    check("só dois modelos (padrão e do zero)",
+          h.ev("Array.from(document.querySelectorAll('.est-preset')).map(b => b.dataset.preset).join()") == "padrao,livre")
     h.ev("document.getElementById('m-nome').value = 'CÁLCULO'")
-    h.ev("document.querySelector('[data-preset=\"at\"]').click()")
-    check("preset AT mostra soma 100", "100 / 100" in txt(h, "#m-soma"), txt(h, "#m-soma"))
-    # soma errada é barrada
-    h.ev("document.querySelector('.est-row .est-max').value = 50;"
-         "document.querySelector('.est-row .est-max').dispatchEvent(new Event('input', {bubbles: true}))")
+    h.ev("document.querySelector('[data-preset=\"livre\"]').click()")
+    check("do zero começa vazio e sem AS",
+          h.ev("document.querySelectorAll('.est-row').length") == 0 and not h.ev("document.getElementById('m-temas').checked"))
+    h.ev("document.getElementById('m-add-prova').click()")
+    h.ev("var r0 = document.querySelector('.est-row'); r0.querySelector('.est-nome').value = 'AT';"
+         "r0.querySelector('.est-max').value = 50;"
+         "var pool = document.getElementById('m-acpool'); pool.value = 40; pool.dispatchEvent(new Event('input', {bubbles: true}))")
     check("soma parcial avisa quanto falta", "faltam 10" in txt(h, "#m-soma"), txt(h, "#m-soma"))
     h.ev("document.getElementById('modal-save').click()")
     check("soma ≠ 100 não salva", h.ev("per().disciplinas.length") == 4 and h.ev("window.__alerts.length") == 1)
-    h.ev("document.querySelector('.est-row .est-max').value = 60")
+    h.ev("document.querySelector('.est-row .est-max').value = 60; document.getElementById('m-nacs').value = 2;"
+         "document.getElementById('m-temas').checked = true")
     h.ev("document.getElementById('modal-save').click()")
     nova = h.ev("per().disciplinas[4]")
     check("disciplina AT criada",
           nova and nova["nome"] == "CÁLCULO" and len(nova["provas"]) == 1 and nova["provas"][0]["max"] == 60
-          and nova["acPool"] == 40 and len(nova["acs"]) == 2 and all(a["valor"] == 20 for a in nova["acs"]),
+          and nova["acPool"] == 40 and len(nova["acs"]) == 2 and all(a["valor"] == 20 for a in nova["acs"])
+          and nova["temAS"] is True,
           json.dumps(nova)[:200])
 
     # 4. detalhe da AT: 1 avaliação, lançar 54/60 pelo modal
@@ -130,6 +136,27 @@ try:
     check("estrutura editada preserva id e nota",
           pv[0]["id"] == "ap1" and pv[0]["nome"] == "P1" and pv[0]["max"] == 35 and pv[0]["value"] == 32
           and pv[1]["max"] == 45, json.dumps(pv)[:160])
+
+    # 7b. tirar a AS pela estrutura: some da tela e do cálculo, sem auto-trigger
+    h.ev("openDetalhe('d1'); document.getElementById('btn-edit-estrutura').click();"
+         "document.getElementById('m-temas').checked = false; document.getElementById('modal-save').click()")
+    check("temAS false salvo", h.ev("per().disciplinas[0].temAS") is False)
+    check("seção AS e toggle somem",
+          h.ev("document.getElementById('sec-as').hidden && document.getElementById('det-as-toggle').hidden"))
+    h.ev("var d0 = per().disciplinas[0]; d0.as.value = 40; d0.as.expectativa = true; saveDisc(d0)")
+    check("AS ignorada no cálculo sem AS", h.ev("calcDisc(per().disciplinas[0]).earnedBase") == 32 + 28.5 + 8)
+    h.ev("var d0 = per().disciplinas[0]; d0.as.value = null; d0.provas.forEach(p => p.value = 10);"
+         "d0.acs.forEach(a => a.value = 1); saveDisc(d0)")
+    check("sem AS não liga auto-trigger", h.ev("per().disciplinas[0].showAS") is False)
+    proj_sem = h.ev("calcStarsProbability(calcPeriodo())")
+    check("reprova sem AS continua tirando do Stars", proj_sem["state"] == "impossible", json.dumps(proj_sem)[:100])
+    # ligar de volta com AS lançada não; desligar com AS lançada é barrado
+    h.ev("var d0 = per().disciplinas[0]; d0.temAS = true; d0.as.value = 20; saveDisc(d0); openDetalhe('d1');"
+         "window.__alerts = []; document.getElementById('btn-edit-estrutura').click();"
+         "document.getElementById('m-temas').checked = false; document.getElementById('modal-save').click()")
+    check("desligar AS com nota lançada é barrado",
+          h.ev("per().disciplinas[0].temAS") is True and h.ev("window.__alerts.length") == 1)
+    h.ev("document.getElementById('modal').hidden = true; var d0 = per().disciplinas[0]; d0.as.value = null; saveDisc(d0)")
 
     # 8. projeção no detalhe
     h.ev("openDetalhe('d2')")

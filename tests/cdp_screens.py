@@ -41,7 +41,7 @@ try:
         time.sleep(0.6)
         h.screenshot(f"{OUT}/cr9_detalhe_{scheme}.png")
         # modal de nova disciplina com o preset AT
-        h.ev("goto('s-disciplinas'); openModalAddDisc(); document.querySelector('[data-preset=\"at\"]').click()")
+        h.ev("goto('s-disciplinas'); openModalAddDisc(); document.querySelector('[data-preset=\"livre\"]').click()")
         time.sleep(0.6)
         h.screenshot(f"{OUT}/cr9_modal_estrutura_{scheme}.png")
         h.ev("document.getElementById('modal').hidden = true")
