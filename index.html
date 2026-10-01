@@ -244,7 +244,10 @@
       <button class="btn-back" data-goto="s-disciplinas">← disciplinas</button>
       <div class="hdr-det">
         <h3 class="stitle" id="det-nome">—</h3>
-        <button class="btn danger sm" id="btn-del-disc">excluir</button>
+        <div class="hdr-det-actions">
+          <button class="btn secondary sm" id="btn-edit-estrutura">estrutura</button>
+          <button class="btn danger sm" id="btn-del-disc">excluir</button>
+        </div>
       </div>
 
       <label class="toggle-row" id="det-as-toggle">
@@ -259,10 +262,15 @@
       </label>
 
       <div class="metric-card">
-        <div class="metric-label">Pontos desta disciplina</div>
-        <div class="metric-value"><span id="det-earned">0</span><span class="metric-unit"> / <span id="det-dist">0</span> de 100</span></div>
+        <div class="metric-label">Pontos desta disciplina<span id="det-bonus"></span></div>
+        <div class="metric-value"><span id="det-earned">0</span><span class="metric-unit"> / <span id="det-total">100</span></span></div>
         <div class="bar"><div class="bar-fill" id="det-bar"></div></div>
         <div class="metric-hint" id="det-status">sem notas</div>
+      </div>
+
+      <div class="metric-card det-proj" id="det-proj" hidden>
+        <div class="metric-label">Onde isso fecha</div>
+        <div id="det-proj-body"></div>
       </div>
 
       <div class="metric-card det-insights" id="det-insights" hidden>
@@ -270,17 +278,9 @@
         <div class="det-insights-grid" id="det-insights-grid"></div>
       </div>
 
-      <div class="section">
-        <div class="section-title">AP1 <span class="section-max">máx 40</span></div>
-        <div class="grade-row" id="row-ap1"></div>
-      </div>
+      <div id="det-provas"></div>
 
-      <div class="section">
-        <div class="section-title">AP2 <span class="section-max">máx 40</span></div>
-        <div class="grade-row" id="row-ap2"></div>
-      </div>
-
-      <div class="section">
+      <div class="section" id="sec-ac">
         <div class="section-title">Atividades Complementares <span class="section-max" id="ac-section-max">máx 20 total</span></div>
         <div class="ac-mode-toggle" id="ac-mode-toggle">
           <button type="button" class="ac-mode-btn active" data-mode="custom">valores custom</button>
@@ -290,9 +290,15 @@
         <button class="btn secondary sm" id="btn-add-ac" style="margin-top:10px">+ atividade</button>
       </div>
 
+      <div class="section" id="sec-extras">
+        <div class="section-title">Pontos extras <span class="section-max">bônus fora da distribuição</span></div>
+        <ul id="lista-extras" class="list tight"></ul>
+        <button class="btn secondary sm" id="btn-add-extra" style="margin-top:10px">+ ponto extra</button>
+      </div>
+
       <div class="section" id="sec-as">
-        <div class="section-title">AS <span class="section-max">substitui pior AP</span></div>
-        <p class="hint" id="as-info">AS só libera quando o total da disciplina está abaixo de 70. Marcar AS oficial elimina sua elegibilidade ao Stars.</p>
+        <div class="section-title">AS <span class="section-max">substitui a pior avaliação</span></div>
+        <p class="hint" id="as-info">A AS aparece sozinha quando a disciplina fecha abaixo de 70. Marcar AS oficial elimina sua elegibilidade ao Stars.</p>
         <div class="grade-row" id="row-as" hidden></div>
       </div>
     </div>

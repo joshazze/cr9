@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smoke da migração v2→v3 + telas básicas. Rodar: python3 tests/cdp_smoke.py"""
+"""Smoke da migração v2→v4 + telas básicas. Rodar: python3 tests/cdp_smoke.py"""
 import json
 import sys
 import os
@@ -54,12 +54,20 @@ try:
     h.goto()
     h.set_state(FIX_V2)
     st = h.ev("JSON.parse(localStorage.getItem('cr9-v1'))")
-    check("v3 após load", st["v"] == 3, f"v={st.get('v')}")
+    check("v4 após load", st["v"] == 4, f"v={st.get('v')}")
     check("1 período", len(st["periodos"]) == 1)
     check("período ativo", st["periodos"][0]["status"] == "ativo")
     check("periodoAtivoId coerente", st["periodoAtivoId"] == st["periodos"][0]["id"])
-    check("disciplinas preservadas byte a byte",
-          st["periodos"][0]["disciplinas"] == FIX_V2["disciplinas"],
+    def preservada(orig, mig):
+        pv = {p["id"]: p for p in mig["provas"]}
+        return (mig["id"] == orig["id"] and mig["nome"] == orig["nome"]
+                and pv["ap1"]["value"] == orig["ap1"]["value"] and pv["ap1"]["expectativa"] == orig["ap1"]["expectativa"]
+                and pv["ap2"]["value"] == orig["ap2"]["value"] and pv["ap2"]["expectativa"] == orig["ap2"]["expectativa"]
+                and pv["ap1"]["max"] == 40 and pv["ap2"]["max"] == 40 and mig["acPool"] == 20
+                and mig["acs"] == orig["acs"] and mig["as"] == orig["as"] and mig["acMode"] == orig["acMode"]
+                and mig["extras"] == [] and "ap1" not in mig and "ap2" not in mig)
+    check("disciplinas preservadas campo a campo (ap1/ap2 → provas)",
+          all(preservada(o, m) for o, m in zip(FIX_V2["disciplinas"], st["periodos"][0]["disciplinas"])),
           json.dumps(st["periodos"][0]["disciplinas"])[:200])
     check("tp preservado", st["periodos"][0]["tp"] == FIX_V2["tp"])
     check("lancamentos seedados", len(st["periodos"][0]["lancamentos"]) == 2)
@@ -93,8 +101,8 @@ try:
     h.set_state(bad)
     st3 = h.ev("JSON.parse(localStorage.getItem('cr9-v1'))")
     d0 = st3["periodos"][0]["disciplinas"][0]
-    check("disciplina malformada saneada (ap1 default)",
-          d0.get("ap1", {}).get("value", "MISSING") is None, json.dumps(d0)[:150])
+    check("disciplina malformada saneada (provas default)",
+          len(d0.get("provas", [])) == 2 and d0["provas"][0]["value"] is None, json.dumps(d0)[:150])
     check("app renderiza com estado saneado",
           h.ev("document.getElementById('stars-num') !== null && per().disciplinas.length === 1"))
 
@@ -102,12 +110,12 @@ try:
     h.ev("localStorage.clear()")
     h.goto()
     check("primeiro uso cria período vazio",
-          h.ev("state.v === 3 && state.periodos.length === 1 && per().disciplinas.length === 0"))
+          h.ev("state.v === 4 && state.periodos.length === 1 && per().disciplinas.length === 0"))
 
     # 7. lançar nota registra lancamento
     h.set_state(FIX_V2)
     h.ev("currentDiscId = 'd2'")
-    h.ev("per().disciplinas.find(d=>d.id==='d2').ap2.value = 30;"
+    h.ev("per().disciplinas.find(d=>d.id==='d2').provas.find(p=>p.id==='ap2').value = 30;"
          "pushRecente({discId:'d2', discNome:'ED', tipo:'ap2', label:'AP2', valor:30, max:40, kind:'oficial'});"
          "saveState()")
     lan = h.ev("per().lancamentos[per().lancamentos.length-1]")
@@ -270,8 +278,9 @@ try:
          "document.getElementById('modal-save').click()")
     nid = h.ev("per().disciplinas[0].id")
     h.ev(f"currentDiscId = '{nid}'")
-    h.ev(f"per().disciplinas[0].ap1.value = 38; per().disciplinas[0].ap1.expectativa = false;"
-         f"pushRecente({{discId: '{nid}', discNome: 'NOVA', tipo: 'ap1', label: 'AP1', valor: 38, max: 40, kind: 'oficial'}});"
+    pid = h.ev("per().disciplinas[0].provas[0].id")
+    h.ev(f"per().disciplinas[0].provas[0].value = 38; per().disciplinas[0].provas[0].expectativa = false;"
+         f"pushRecente({{discId: '{nid}', discNome: 'NOVA', tipo: '{pid}', label: 'AP1', valor: 38, max: 40, kind: 'oficial'}});"
          "saveState(); renderHome()")
     hist_txt = h.ev("document.getElementById('track-historico').textContent") or ""
     check("histórico plota CR e delta", "CR" in hist_txt and "vs" in hist_txt, hist_txt[:100])
@@ -290,4 +299,4 @@ print()
 if fails:
     print(f"{len(fails)} FALHAS: {fails}")
     sys.exit(1)
-print("smoke v3 OK")
+print("smoke v4 OK")

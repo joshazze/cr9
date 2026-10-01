@@ -37,10 +37,12 @@ Então fiz o meu. Vanilla stack, zero dependências em runtime, instalável no i
 ## Features
 
 - **Home com 3 focos intercambiáveis** — Stars (projeção + probabilidade), Tracking (gráficos de progressão, aproveitamento, expectativa vs oficial) ou Registro (lançamento rápido de notas)
-- **Modelo de disciplinas flexível** — AP1, AP2, N ACs com pesos customizáveis (soma ≤ 20) ou modo igualitário (20/N), seção de AS aparece automaticamente quando a média cai abaixo de 70
+- **Estrutura de disciplina livre** — padrão AP1 40 + AP2 40 + ACs 20, ou qualquer outra distribuição que feche 100 (ex.: AT 60 + 2 ACs de 20), editável depois sem perder nota; AS substitui a avaliação de pior fração
+- **Pontos extras** — bônus fora da distribuição (participação, ponto do professor) que somam na nota com teto de 100, oficial ou previsão
 - **Simulador** — testa cenários "e se eu tirar X na AP2?" sem sujar os dados reais
-- **Teste de Progresso** — bônus do TP aplicado na disciplina alvo, recalcula CR com e sem TP
-- **Probabilidade do Stars** — estimativa baseada no rendimento atual vs necessário nos slots restantes
+- **Teste de Progresso** — o bônus entra na nota da disciplina alvo em todas as telas, com teto de 100 (o app mostra quanto se perde no teto e sugere o alvo que aproveita mais)
+- **Probabilidade do Stars** — modelo Beta hierárquico por avaliação (prova e AC separadas, pooling entre disciplinas, histórico dos períodos anteriores) + Monte Carlo com teto de 100 e aprovação ≥ 70 por disciplina. Calibração contra o modelo anterior em `tests/calibracao.js` (Brier 17–27% menor)
+- **Projeção por disciplina** — quanto falta pra 70 e pra 9,0, nota final esperada com faixa e chance de passar direto
 - **Export/import** em JSON pra backup manual
 
 ## Decisões de design

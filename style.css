@@ -2566,3 +2566,86 @@ header::before {
 }
 .reg-progress { margin-top: 16px; }
 
+
+/* ── v4: estrutura de disciplina, extras, projeção ── */
+/* [hidden] precisa vencer display:flex/grid de classe (a linha da AS vazava um card vazio) */
+[hidden] { display: none !important; }
+.tp-badge { white-space: nowrap; }
+.hdr-det-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.tp-badge.extra {
+  background: var(--success-soft);
+  color: var(--success);
+}
+.det-proj-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.det-proj-val { font-weight: 600; color: var(--text); text-align: right; }
+.det-proj-val.success { color: var(--success); }
+.det-proj-val.warning { color: var(--warning); }
+.det-proj-val.danger { color: var(--danger); }
+.det-proj-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-top: 12px;
+}
+.det-proj-fim { margin: 10px 0 0; font-size: 13px; color: var(--text-dim); }
+
+.est-presets { display: flex; flex-wrap: wrap; gap: 8px; }
+.est-preset {
+  -webkit-appearance: none;
+  appearance: none;
+  touch-action: manipulation;
+  flex: 1 1 auto;
+  min-height: 40px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg2);
+  color: var(--text);
+  font: 500 13px/1.2 var(--sans);
+  cursor: pointer;
+}
+.est-preset.on {
+  border-color: var(--accent);
+  background: var(--accent-softer);
+  color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+.est-bloco { display: flex; flex-direction: column; gap: 8px; }
+.est-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding-right: 48px;
+}
+.est-list { display: flex; flex-direction: column; gap: 8px; }
+.est-row { display: grid; grid-template-columns: minmax(0, 1fr) 84px 40px; gap: 8px; align-items: center; }
+.modal-body .est-row input { min-width: 0; width: 100%; }
+.est-del {
+  -webkit-appearance: none;
+  appearance: none;
+  touch-action: manipulation;
+  height: 40px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 18px;
+  cursor: pointer;
+}
+.est-del:active { color: var(--danger); background: var(--danger-soft); }
+.est-soma { margin: 0; font: 600 13px/1.4 var(--sans); }
+.est-soma.ok { color: var(--success); }
+.est-soma.bad { color: var(--danger); }

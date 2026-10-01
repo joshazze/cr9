@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Screenshots light/dark dos 3 focos + config, pro smoke visual.
+"""Screenshots light/dark dos 3 focos, config, disciplinas, detalhe e modal de estrutura.
 Uso: python3 tests/cdp_screens.py <outdir>"""
 import sys
 import os
@@ -32,6 +32,19 @@ try:
         h.ev("goto('s-config')")
         time.sleep(0.6)
         h.screenshot(f"{OUT}/cr9_config_{scheme}.png")
+        h.ev("goto('s-disciplinas')")
+        time.sleep(0.6)
+        h.screenshot(f"{OUT}/cr9_disciplinas_{scheme}.png")
+        # detalhe com TP + extra + projeção
+        h.ev("var d = per().disciplinas[0]; if (!d.extras.length) d.extras.push("
+             "{id: 'ex1', nome: 'participação', value: 2, expectativa: false}); saveState(); openDetalhe('d1')")
+        time.sleep(0.6)
+        h.screenshot(f"{OUT}/cr9_detalhe_{scheme}.png")
+        # modal de nova disciplina com o preset AT
+        h.ev("goto('s-disciplinas'); openModalAddDisc(); document.querySelector('[data-preset=\"at\"]').click()")
+        time.sleep(0.6)
+        h.screenshot(f"{OUT}/cr9_modal_estrutura_{scheme}.png")
+        h.ev("document.getElementById('modal').hidden = true")
     print("screenshots em", OUT)
 finally:
     h.stop()

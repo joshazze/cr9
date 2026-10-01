@@ -4,22 +4,29 @@ const KEY = 'cr9-v1';
 const MAX_RECENTES = 12;
 const MAX_LANCAMENTOS = 500;
 // Bumpar junto com CACHE_NAME do sw.js a cada deploy.
-const APP_VERSION = 'v17';
+const APP_VERSION = 'v18';
 
-// Regras Ibmec/Stars: disciplina = AP1(40) + AP2(40) + pool de AC(20);
-// aprovação aos 70/100; Stars = média 9,0 (90 pts/disciplina) com ≥4
-// disciplinas. Displays de estado vazio assumem 5 disciplinas (450/500).
+// Regras Ibmec/Stars: disciplina vale 100 pts. Estrutura padrão AP1(40) +
+// AP2(40) + pool de AC(20), mas cada disciplina pode ter a sua (ex.: AT 60 +
+// 2 AC de 20). Aprovação aos 70% do total; Stars = média 9,0 (90% do total)
+// com ≥4 disciplinas. Bônus (TP e pontos extras) somam na nota com teto de
+// 100. Displays de estado vazio assumem 5 disciplinas (450/500).
 const AP_MAX = 40;
 const AC_POOL = 20;
 const DISC_TOTAL = 100;
-const APROVACAO_MIN = 70;
+const APROV_FRAC = 0.7;
+const STARS_FRAC = 0.9;
 const STARS_POR_DISC = 90;
 const STARS_MIN_DISC = 4;
 const EMPTY_STARS_DEN = 5 * STARS_POR_DISC;
 const EMPTY_TOTAL_DEN = 5 * DISC_TOTAL;
-// Prior do rendimento na probabilidade Stars: Beta(7,3) ≈ aluno de 70%.
-const BETA_PRIOR_A = 7;
-const BETA_PRIOR_B = 3;
+
+// Estruturas prontas no modal de disciplina (tudo editável depois).
+const PRESETS = {
+  padrao: { label: 'AP1 + AP2 + ACs', provas: [['AP1', 40], ['AP2', 40]], acPool: 20, nAcs: 0 },
+  at: { label: 'AT + 2 ACs', provas: [['AT', 60]], acPool: 40, nAcs: 2 },
+  livre: { label: 'do zero', provas: [['Avaliação 1', 50]], acPool: 50, nAcs: 0 }
+};
 
 // ───────── HELPERS ─────────
 
@@ -343,9 +350,35 @@ function migrateState(s) {
     p.disciplinas.forEach(d => {
       if (!d.id) d.id = uid();
       if (typeof d.nome !== 'string' || !d.nome) d.nome = 'sem nome';
-      ['ap1', 'ap2'].forEach(k => {
-        if (!d[k] || typeof d[k] !== 'object') d[k] = { value: null, expectativa: false };
-        if (d[k].value === undefined || (d[k].value !== null && typeof d[k].value !== 'number')) d[k].value = null;
+      // v3→v4: AP1/AP2 fixos viram a lista `provas`, com os mesmos ids
+      // ('ap1','ap2') pra série de lançamentos continuar casando.
+      if (!Array.isArray(d.provas)) {
+        d.provas = [['ap1', 'AP1'], ['ap2', 'AP2']].map(([k, nome]) => {
+          const src = d[k] && typeof d[k] === 'object' ? d[k] : {};
+          return {
+            id: k, nome, max: AP_MAX,
+            value: typeof src.value === 'number' ? src.value : null,
+            expectativa: src.expectativa === true
+          };
+        });
+      }
+      delete d.ap1; delete d.ap2;
+      d.provas = d.provas.filter(pv => pv && typeof pv === 'object');
+      d.provas.forEach(pv => {
+        if (!pv.id) pv.id = 'pv-' + uid();
+        if (typeof pv.nome !== 'string' || !pv.nome) pv.nome = 'Avaliação';
+        if (typeof pv.max !== 'number' || !(pv.max > 0)) pv.max = AP_MAX;
+        if (typeof pv.value !== 'number') pv.value = null;
+        pv.expectativa = pv.expectativa === true;
+      });
+      if (typeof d.acPool !== 'number' || !(d.acPool >= 0)) d.acPool = AC_POOL;
+      if (!Array.isArray(d.extras)) d.extras = [];
+      d.extras = d.extras.filter(ex => ex && typeof ex === 'object');
+      d.extras.forEach(ex => {
+        if (!ex.id) ex.id = 'ex-' + uid();
+        if (typeof ex.nome !== 'string' || !ex.nome) ex.nome = 'extra';
+        if (typeof ex.value !== 'number') ex.value = null;
+        ex.expectativa = ex.expectativa === true;
       });
       if (!d.as || typeof d.as !== 'object') d.as = { value: null, expectativa: false, taken: false };
       if (d.as.value === undefined || (d.as.value !== null && typeof d.as.value !== 'number')) d.as.value = null;
@@ -377,7 +410,7 @@ function migrateState(s) {
   if (ativo.status === 'ativo') ativo.arquivadoEm = null;
   s.periodoAtivoId = ativo.id;
 
-  s.v = 3;
+  s.v = 4;
   return s;
 }
 
@@ -391,11 +424,15 @@ function loadState() {
         if (!Array.isArray(parsed.periodos) && !localStorage.getItem('cr9-v2-backup')) {
           try { localStorage.setItem('cr9-v2-backup', raw); } catch (e) {}
         }
+        // Idem pra v3→v4 (AP1/AP2 fixos viram `provas`).
+        if (Array.isArray(parsed.periodos) && parsed.v !== 4 && !localStorage.getItem('cr9-v3-backup')) {
+          try { localStorage.setItem('cr9-v3-backup', raw); } catch (e) {}
+        }
         return migrateState(parsed);
       }
     }
   } catch (e) {}
-  return migrateState({ v: 3, gender: null, foco: null, periodoAtivoId: null, periodos: [] });
+  return migrateState({ v: 4, gender: null, foco: null, periodoAtivoId: null, periodos: [] });
 }
 
 function saveState() {
@@ -422,7 +459,9 @@ function pushLancamento(entry) {
   p.lancamentos.push({
     ts: Date.now(),
     discId: entry.discId || null,
-    slot: entry.tipo === 'ac' ? 'ac:' + (entry.acId || entry.label || '') : entry.tipo,
+    slot: entry.tipo === 'ac' ? 'ac:' + (entry.acId || entry.label || '')
+      : entry.tipo === 'extra' ? 'ex:' + entry.exId
+      : entry.tipo,
     valor: entry.valor,
     max: typeof entry.max === 'number' ? entry.max : null,
     kind: entry.kind === 'expectativa' ? 'expectativa' : 'oficial'
@@ -439,43 +478,74 @@ function pushRecente(entry) {
 }
 
 let state = loadState();
-saveState(); // persiste a migração de schema já no boot (backup v2 fica em cr9-v2-backup)
+saveState(); // persiste a migração de schema já no boot (backups em cr9-v2-backup/cr9-v3-backup)
 let simState = {};
 let currentDiscId = null;
 
 // ───────── CÁLCULOS ─────────
 
-function calcDisc(d, ov = {}) {
-  const ap1v = ov.ap1 !== undefined ? ov.ap1 : d.ap1.value;
-  const ap2v = ov.ap2 !== undefined ? ov.ap2 : d.ap2.value;
+const hasVal = v => v !== null && v !== undefined && !isNaN(v);
+
+function discTotal(d) {
+  return d.provas.reduce((s, pv) => s + (pv.max || 0), 0) + (d.acPool || 0);
+}
+
+// AS é lançada na escala da maior avaliação (40 no padrão, 60 numa AT de 60).
+function asMaxDisc(d) {
+  return d.provas.reduce((m, pv) => Math.max(m, pv.max || 0), 0);
+}
+
+// Bônus bruto do TP pra disciplina (antes do teto de 100).
+function tpRaw(d, tp) {
+  return tp && hasVal(tp.value) && tp.applyTo === d.id ? Math.round(tp.value * 10) : 0;
+}
+
+// Nota da disciplina. `earned` JÁ inclui TP e pontos extras, com teto no total
+// da disciplina: é o número que aparece em toda tela. `earnedBase` é só o que
+// veio das avaliações (base do aproveitamento e do modelo estatístico).
+// ov = overrides do simulador: { provas: {id: v}, asValue, asTaken, acs, acExtra, tp }.
+function calcDisc(d, ov = {}, periodo = per()) {
+  const total = discTotal(d);
+  const ovp = ov.provas || {};
+  const vals = d.provas.map(pv => {
+    const v = ovp[pv.id] !== undefined ? ovp[pv.id] : pv.value;
+    return hasVal(v) ? v : null;
+  });
   const asTaken = ov.asTaken !== undefined ? ov.asTaken : d.as.taken;
-  // AS value enters calculation whenever it exists (expectativa or oficial).
-  // `asTaken` (oficial) only gates Ibmec Stars elimination.
+  // AS entra no cálculo sempre que existe (previsão ou oficial); só a oficial
+  // (`taken`) elimina do Stars.
   const asv = ov.asValue !== undefined ? ov.asValue : d.as.value;
 
-  let ap1F = ap1v, ap2F = ap2v;
-  if (asv !== null && asv !== undefined) {
-    if (ap1v === null && ap2v === null) {
-      ap1F = asv;
-      ap2F = null;
-    } else if (ap1v === null) {
-      ap1F = asv;
-      ap2F = ap2v;
-    } else if (ap2v === null) {
-      ap1F = ap1v;
-      ap2F = asv;
-    } else if (ap1v <= ap2v) {
-      ap1F = Math.max(ap1v, asv);
+  // AS preenche a primeira avaliação vazia; sem vazia, substitui a de menor
+  // fração se for melhor. No padrão (AP 40/40) é exatamente a regra antiga.
+  const finais = vals.slice();
+  const asM = asMaxDisc(d);
+  if (hasVal(asv) && asM > 0 && finais.length) {
+    const frac = asv / asM;
+    const iVazia = finais.indexOf(null);
+    if (iVazia >= 0) {
+      finais[iVazia] = frac * d.provas[iVazia].max;
     } else {
-      ap2F = Math.max(ap2v, asv);
+      let iMin = 0;
+      for (let i = 1; i < finais.length; i++) {
+        if (finais[i] / d.provas[i].max < finais[iMin] / d.provas[iMin].max) iMin = i;
+      }
+      finais[iMin] = Math.max(finais[iMin], frac * d.provas[iMin].max);
     }
   }
 
+  let provaEarned = 0, provaDist = 0;
+  finais.forEach((v, i) => {
+    if (v === null) return;
+    provaEarned += v;
+    provaDist += d.provas[i].max;
+  });
+
+  const pool = d.acPool || 0;
   const acMode = d.acMode || 'custom';
   let acEarned = 0, acDist = 0;
   if (acMode === 'equal') {
-    const nAcs = d.acs.length;
-    const share = nAcs > 0 ? AC_POOL / nAcs : 0;
+    const share = d.acs.length > 0 ? pool / d.acs.length : 0;
     d.acs.forEach(ac => {
       const deliv = ov.acs && ov.acs[ac.id] !== undefined ? ov.acs[ac.id] : ac.delivered;
       if (deliv === true || deliv === false) {
@@ -486,109 +556,128 @@ function calcDisc(d, ov = {}) {
   } else {
     d.acs.forEach(ac => {
       const v = ov.acs && ov.acs[ac.id] !== undefined ? ov.acs[ac.id] : ac.value;
-      if (v !== null && v !== undefined) {
+      if (hasVal(v)) {
         acEarned += v;
         acDist += ac.valor;
       }
     });
   }
 
-  // Sim-only: hypothetical "AC restante" — points for ACs not yet created.
-  if (ov.acExtra !== undefined && ov.acExtra !== null && !isNaN(ov.acExtra)) {
+  // Sim-only: "AC restante" hipotética (pontos de AC ainda não criadas).
+  if (hasVal(ov.acExtra)) {
     acEarned += ov.acExtra;
     acDist += ov.acExtra;
   }
 
-  const earned = (ap1F !== null && ap1F !== undefined ? ap1F : 0)
-               + (ap2F !== null && ap2F !== undefined ? ap2F : 0)
-               + acEarned;
-  const dist = (ap1F !== null && ap1F !== undefined ? AP_MAX : 0)
-             + (ap2F !== null && ap2F !== undefined ? AP_MAX : 0)
-             + acDist;
+  const earnedBase = provaEarned + acEarned;
+  const dist = provaDist + acDist;
+
+  const tp = ov.tp !== undefined ? ov.tp : periodo.tp;
+  const tpB = tpRaw(d, tp);
+  const exList = ov.extras || d.extras || [];
+  const exB = exList.reduce((s, ex) => s + (hasVal(ex.value) ? ex.value : 0), 0);
+  const earned = Math.min(total, earnedBase + tpB + exB);
+  const bonus = Math.max(0, earned - earnedBase);
+  const tpBonus = Math.min(tpB, bonus);
 
   return {
     earned,
+    earnedBase,
     dist,
-    // hasAS = AS is OFICIAL (taken). Expectativa does not eliminate Stars.
-    hasAS: asTaken === true && asv !== null && asv !== undefined,
-    ap1F,
-    ap2F
+    total,
+    bonus,
+    tpBonus,
+    extrasBonus: bonus - tpBonus,
+    bonusRaw: tpB + exB,
+    // hasAS = AS OFICIAL (taken). Previsão não elimina do Stars.
+    hasAS: asTaken === true && hasVal(asv),
+    provasF: finais
   };
+}
+
+// Mesma conta só com o que é OFICIAL: previsões de avaliação, AC, extra e TP
+// ficam de fora. É o gate do "garantido".
+function calcDiscOficialOnly(d, periodo = per()) {
+  const limpa = slot => slot.expectativa ? { ...slot, value: null } : slot;
+  const dummy = {
+    ...d,
+    provas: d.provas.map(limpa),
+    as: d.as.expectativa ? { value: null, expectativa: false, taken: d.as.taken } : d.as,
+    acs: d.acs.map(ac => (d.acMode !== 'equal' && ac.expectativa) ? { ...ac, value: null } : ac),
+    extras: (d.extras || []).map(limpa)
+  };
+  const tp = periodo.tp && !periodo.tp.expectativa ? periodo.tp : null;
+  return calcDisc(dummy, { tp }, periodo);
 }
 
 function calcPeriodo(sim = {}, periodo = per()) {
   const n = periodo.disciplinas.length;
-  const total = n * DISC_TOTAL;
-  const starsNeeded = n * STARS_POR_DISC;
-  let earnedReg = 0, distReg = 0, anyAS = false;
+  let total = 0, earnedReg = 0, earnedBase = 0, distReg = 0;
+  let tpBonus = 0, bonusReg = 0, earnedOficial = 0, anyAS = false;
 
   periodo.disciplinas.forEach(d => {
-    const simD = (sim.disc && sim.disc[d.id]) || {};
-    const r = calcDisc(d, simD);
+    const simD = Object.assign({}, (sim.disc && sim.disc[d.id]) || {});
+    if (sim.tp !== undefined) simD.tp = sim.tp;
+    const r = calcDisc(d, simD, periodo);
+    total += r.total;
     earnedReg += r.earned;
+    earnedBase += r.earnedBase;
     distReg += r.dist;
+    tpBonus += r.tpBonus;
+    bonusReg += r.bonus;
     if (r.hasAS) anyAS = true;
+    earnedOficial += calcDiscOficialOnly(d, periodo).earned;
   });
 
-  const tp = sim.tp !== undefined ? sim.tp : periodo.tp;
-  let tpBonus = 0;
-  if (tp && tp.value !== null && tp.value !== undefined && tp.applyTo) {
-    tpBonus = Math.round(tp.value * 10);
-  }
-
-  // Total só com notas oficiais (previsões fora) — é o gate do "garantido".
-  let earnedOficial = 0;
-  periodo.disciplinas.forEach(d => { earnedOficial += calcDiscOficialOnly(d).earned; });
-  const tpOficial = (tp && tp.value !== null && tp.value !== undefined && tp.applyTo && !tp.expectativa)
-    ? Math.round(tp.value * 10) : 0;
-  const totalOficial = earnedOficial + tpOficial;
-
-  const aprov = distReg > 0 ? (earnedReg / distReg) * 100 : null;
-  const totalScore = earnedReg + tpBonus;
+  const starsNeeded = Math.round(total * STARS_FRAC * 100) / 100;
+  // Aproveitamento = desempenho nas avaliações (sem bônus). Os pontos
+  // (earnedReg/totalScore) é que carregam TP e extras.
+  const aprov = distReg > 0 ? (earnedBase / distReg) * 100 : null;
+  const totalScore = earnedReg;
   const enrolledOk = n >= STARS_MIN_DISC;
   const starsEligible = !anyAS && enrolledOk;
-  const starsProgress = starsNeeded > 0
-    ? Math.min(totalScore / starsNeeded, 1) * 100
-    : 0;
+  const starsProgress = starsNeeded > 0 ? Math.min(totalScore / starsNeeded, 1) * 100 : 0;
 
   return {
     n, total, starsNeeded,
-    earnedReg, distReg,
-    tpBonus, totalScore, totalOficial,
+    earnedReg, earnedBase, distReg,
+    tpBonus, bonusReg, totalScore, totalOficial: earnedOficial,
     aprov, anyAS, enrolledOk,
     starsEligible, starsProgress
   };
 }
 
-// Slots de pontuação ainda não lançados do período ativo.
-// Invariante: Σ max === total − distReg (mesma contabilidade do calcDisc).
-function remainingSlots(periodo = per()) {
+// Slots de pontuação ainda não lançados, por disciplina, tipados pro modelo:
+// 'prova' (avaliação), 'ac' (AC com nota ou pool ainda não criado), 'bin'
+// (AC por entrega, split igual). Invariante: Σ max === total − distReg.
+function slotsDisc(d, periodo = per()) {
   const slots = [];
-  periodo.disciplinas.forEach(d => {
-    const r = calcDisc(d);
-    if (r.ap1F === null || r.ap1F === undefined) slots.push({ max: 40 });
-    if (r.ap2F === null || r.ap2F === undefined) slots.push({ max: 40 });
-    const mode = d.acMode || 'custom';
-    if (mode === 'equal') {
-      const n = d.acs.length;
-      if (n === 0) {
-        slots.push({ max: 20 });
-      } else {
-        const share = 20 / n;
-        d.acs.forEach(ac => {
-          if (ac.delivered !== true && ac.delivered !== false) slots.push({ max: share });
-        });
-      }
-    } else {
-      d.acs.forEach(ac => {
-        if (ac.value === null || ac.value === undefined) slots.push({ max: ac.valor });
-      });
-      const alocado = d.acs.reduce((s, ac) => s + (ac.valor || 0), 0);
-      const resto = 20 - alocado;
-      if (resto > 0.01) slots.push({ max: resto });
-    }
+  const r = calcDisc(d, {}, periodo);
+  r.provasF.forEach((v, i) => {
+    if (v === null) slots.push({ type: 'prova', max: d.provas[i].max });
   });
+  const pool = d.acPool || 0;
+  if ((d.acMode || 'custom') === 'equal') {
+    if (d.acs.length === 0) {
+      if (pool > 0.01) slots.push({ type: 'ac', max: pool });
+    } else {
+      const share = pool / d.acs.length;
+      d.acs.forEach(ac => {
+        if (ac.delivered !== true && ac.delivered !== false) slots.push({ type: 'bin', max: share });
+      });
+    }
+  } else {
+    d.acs.forEach(ac => {
+      if (!hasVal(ac.value)) slots.push({ type: 'ac', max: ac.valor });
+    });
+    const resto = pool - d.acs.reduce((s, ac) => s + (ac.valor || 0), 0);
+    if (resto > 0.01) slots.push({ type: 'ac', max: resto });
+  }
   return slots;
+}
+
+function remainingSlots(periodo = per()) {
+  return periodo.disciplinas.reduce((all, d) => all.concat(slotsDisc(d, periodo)), []);
 }
 
 // ───────── ANALYTICS (série de lançamentos) ─────────
@@ -633,8 +722,7 @@ function seriePontos(periodo) {
 // antigo sem série). Base da consistência.
 function notasNormalizadasDisc(d) {
   const ys = [];
-  if (d.ap1.value !== null && d.ap1.value !== undefined) ys.push(d.ap1.value / 40);
-  if (d.ap2.value !== null && d.ap2.value !== undefined) ys.push(d.ap2.value / 40);
+  d.provas.forEach(pv => { if (hasVal(pv.value)) ys.push(pv.value / pv.max); });
   const mode = d.acMode || 'custom';
   if (mode === 'equal') {
     d.acs.forEach(ac => {
@@ -643,10 +731,31 @@ function notasNormalizadasDisc(d) {
     });
   } else {
     d.acs.forEach(ac => {
-      if (ac.value !== null && ac.value !== undefined && ac.valor > 0) ys.push(ac.value / ac.valor);
+      if (hasVal(ac.value) && ac.valor > 0) ys.push(ac.value / ac.valor);
     });
   }
   return ys;
+}
+
+// Evidência OFICIAL da disciplina pro modelo estatístico, em frações por
+// avaliação (prova e AC separadas; AC por entrega é 0/1). Previsão não é
+// evidência de desempenho.
+function obsDisc(d) {
+  const obs = { prova: [], ac: [], bin: [] };
+  d.provas.forEach(pv => {
+    if (hasVal(pv.value) && !pv.expectativa) obs.prova.push(pv.value / pv.max);
+  });
+  if ((d.acMode || 'custom') === 'equal') {
+    d.acs.forEach(ac => {
+      if (ac.delivered === true) obs.bin.push(1);
+      else if (ac.delivered === false) obs.bin.push(0);
+    });
+  } else {
+    d.acs.forEach(ac => {
+      if (hasVal(ac.value) && !ac.expectativa && ac.valor > 0) obs.ac.push(ac.value / ac.valor);
+    });
+  }
+  return obs;
 }
 
 function bandaConsistencia(cv) {
@@ -656,10 +765,11 @@ function bandaConsistencia(cv) {
   return { label: 'montanha-russa', cls: 'danger' };
 }
 
-// CR-equivalente do período (0–10): aproveitamento/10 — definido mesmo parcial.
+// CR-equivalente do período (0–10): pontos (com TP/extras) sobre o lançado.
+// Com o período fechado é exatamente a média das notas finais.
 function crEquivPeriodo(p) {
   const r = calcPeriodo({}, p);
-  return r.aprov !== null ? r.aprov / 10 : null;
+  return r.distReg > 0 ? Math.min(10, (r.earnedReg / r.distReg) * 10) : null;
 }
 
 // Leitura da disciplina no detalhe: tendência, forma e consistência locais.
@@ -711,11 +821,42 @@ function renderDetInsights(d) {
     + '<div class="det-ins"><span class="det-ins-label">consistência</span>' + (consHTML || '<span class="det-ins-val dim">—</span><span class="det-ins-sub">3+ notas</span>') + '</div>';
 }
 
-// Probabilidade do Stars: posterior Beta(7+ganhos, 3+perdidos) do rendimento
-// + Monte Carlo (20k draws, seed determinístico do estado) sobre os slots
-// restantes. Estados especiais decididos antes da simulação; "garantido"
-// exige pontos OFICIAIS (previsão não trava).
-let mcMemo = null;
+// Projeção do período pelo modelo hierárquico (CR9Math.starsProbability):
+// rendimento por avaliação com pooling entre disciplinas, prova e AC
+// separadas, disciplinas dos períodos arquivados como evidência (peso 0,5),
+// teto de 100 com TP/extras e aprovação ≥70% por disciplina. Seed = hash do
+// input ⇒ determinístico entre re-renders. Memo das últimas 4 entradas.
+const mcMemo = new Map();
+function projecaoPeriodo(periodo = per()) {
+  if (!periodo.disciplinas.length) return null;
+  const discs = periodo.disciplinas.map(d => {
+    const r = calcDisc(d, {}, periodo);
+    return {
+      total: r.total,
+      known: r.earnedBase,
+      bonus: r.bonusRaw,
+      obs: obsDisc(d),
+      slots: slotsDisc(d, periodo)
+    };
+  });
+  const history = state.periodos
+    .filter(px => px !== periodo)
+    .reduce((all, px) => all.concat(px.disciplinas.map(obsDisc)), [])
+    .filter(o => o.prova.length || o.ac.length || o.bin.length);
+  const need = periodo.disciplinas.reduce((s, d) => s + discTotal(d), 0) * STARS_FRAC;
+  const inp = { discs, history, need, minFrac: APROV_FRAC, draws: 20000 };
+  const seed = CR9Math.fnv1a(JSON.stringify(inp));
+  if (mcMemo.has(seed)) return mcMemo.get(seed);
+  const res = CR9Math.starsProbability(Object.assign({ seed }, inp));
+  mcMemo.set(seed, res);
+  if (mcMemo.size > 4) mcMemo.delete(mcMemo.keys().next().value);
+  return res;
+}
+
+// Estados especiais decididos antes da simulação. "Garantido" exige pontos
+// OFICIAIS acima da meta E toda disciplina já aprovada no oficial (uma com
+// 50/100 e 450 no total ainda pode cair na AS). "Impossível" considera o teto
+// de 100 por disciplina e a aprovação.
 function calcStarsProbability(p, periodo = per()) {
   if (p.n === 0) return { state: 'empty' };
   if (p.anyAS) return { state: 'out' };
@@ -724,40 +865,40 @@ function calcStarsProbability(p, periodo = per()) {
 
   const remaining = Math.max(0, p.total - p.distReg);
   const need = p.starsNeeded - p.totalScore;
-  const rate = (p.earnedReg / p.distReg) * 100;
+  const rate = p.aprov;
 
-  if (p.starsNeeded - p.totalOficial <= 0) {
+  const todasAprovadas = periodo.disciplinas.every(d =>
+    calcDiscOficialOnly(d, periodo).earned >= APROV_FRAC * discTotal(d) - 1e-9);
+  if (p.starsNeeded - p.totalOficial <= 1e-9 && todasAprovadas) {
     return { state: 'locked', remaining, need: 0, rate, projected: p.totalScore };
   }
-  if (need > remaining) {
-    const maxPossible = p.totalScore + remaining;
+
+  let maxPossible = 0;
+  let travada = null;
+  periodo.disciplinas.forEach(d => {
+    const r = calcDisc(d, {}, periodo);
+    const livre = slotsDisc(d, periodo).reduce((s, sl) => s + sl.max, 0);
+    const teto = Math.min(r.total, r.earnedBase + livre + r.bonusRaw);
+    maxPossible += teto;
+    if (teto < APROV_FRAC * r.total - 1e-9 && !travada) travada = d.nome;
+  });
+  if (travada) {
+    return { state: 'impossible', motivo: 'reprova', disc: travada, remaining, need, rate, projected: maxPossible };
+  }
+  if (maxPossible < p.starsNeeded - 1e-9) {
     return { state: 'impossible', remaining, need, rate, projected: maxPossible };
   }
 
-  const slots = remainingSlots(periodo);
-  const alpha = BETA_PRIOR_A + p.earnedReg;
-  const beta = BETA_PRIOR_B + (p.distReg - p.earnedReg);
-  const seed = CR9Math.fnv1a(JSON.stringify([
-    periodo.id,
-    Math.round(p.earnedReg * 100),
-    Math.round(p.distReg * 100),
-    p.starsNeeded,
-    Math.round(p.totalScore * 100),
-    slots.map(s => Math.round(s.max * 100))
-  ]));
-  const mc = (mcMemo && mcMemo.seed === seed)
-    ? mcMemo.result
-    : CR9Math.starsMonteCarlo({ slots, need, alpha, beta, draws: 20000, seed, kappa: 12 });
-  mcMemo = { seed, result: mc };
-
+  const mc = projecaoPeriodo(periodo);
   return {
     state: 'computed',
     pct: mc.pct,
+    pReprova: mc.pReprova,
     rate,
     needRate: remaining > 0 ? (need / remaining) * 100 : 0,
-    projected: p.totalScore + mc.mean,
-    projLo: p.totalScore + mc.p10,
-    projHi: p.totalScore + mc.p90,
+    projected: mc.mean,
+    projLo: mc.p10,
+    projHi: mc.p90,
     remaining,
     need
   };
@@ -771,10 +912,9 @@ function renderSegBar() {
   }
   el.innerHTML = per().disciplinas.map(d => {
     const r = calcDisc(d);
-    const tpB = tpBonusForDisc(d.id);
-    const distW = Math.max(0, Math.min(100, r.dist + tpB));
-    const earnedW = Math.max(0, Math.min(100, r.earned + tpB));
-    const title = escapeHTML(d.nome) + ' — ' + fmtNum(r.earned + tpB, 1) + '/' + fmtNum(r.dist + tpB, 0) + ' pts';
+    const distW = larg(Math.max(r.dist, r.earned), r.total);
+    const earnedW = larg(r.earned, r.total);
+    const title = escapeHTML(d.nome) + ' — ' + fmtNum(r.earned, 1) + '/' + fmtNum(r.total, 0) + ' pts';
     return '<div class="seg" title="' + title + '">'
       + '<div class="seg-dist-fill" style="width:' + distW + '%"></div>'
       + '<div class="seg-earned-fill" style="width:' + earnedW + '%"></div>'
@@ -836,7 +976,7 @@ function renderProbCard(p) {
     cardEl.classList.add('danger');
     statusEl.textContent = 'matrícula insuficiente';
     statusEl.className = 'stars-status out';
-    needEl.textContent = 4 - p.n + ' disc. a mais';
+    needEl.textContent = STARS_MIN_DISC - p.n + ' disc. a mais';
     hintEl.textContent = 'o Stars exige matrícula em 4+ disciplinas — você tem ' + p.n;
     return;
   }
@@ -883,7 +1023,9 @@ function renderProbCard(p) {
     projEl.textContent = 'máx ' + fmtNum(prob.projected, 0) + ' pts';
     needEl.textContent = fmtNum(prob.need, 0) + ' pts';
     rateEl.textContent = fmtNum(prob.rate, 1) + '%';
-    hintEl.textContent = 'faltam mais pontos do que ainda dá pra distribuir';
+    hintEl.textContent = prob.motivo === 'reprova'
+      ? prob.disc + ' não chega mais a 70 sem AS, e AS elimina do Stars'
+      : 'faltam mais pontos do que ainda dá pra distribuir (já contando o teto de 100 por disciplina)';
     return;
   }
 
@@ -916,6 +1058,8 @@ function renderProbCard(p) {
   if (prob.pct < 0.00001) {
     const gap = Math.max(0, prob.needRate - prob.rate);
     hintEl.textContent = 'chance ínfima — precisa subir ' + fmtNum(gap, 0) + ' pts% no rendimento pros ' + fmtNum(prob.remaining, 0) + ' restantes';
+  } else if (prob.pReprova >= 5) {
+    hintEl.textContent = fmtNum(prob.pReprova, 0) + '% de chance de alguma disciplina fechar abaixo de 70 (AS elimina) — é o que mais pesa na conta';
   } else if (prob.needRate <= prob.rate) {
     hintEl.textContent = 'mantendo seu rendimento, você chega lá — ' + fmtPct(prob.pct) + '% de chance';
   } else {
@@ -924,34 +1068,39 @@ function renderProbCard(p) {
   }
 }
 
-// Cor acompanha o número exibido (sem TP) — TP aparece no badge e na barra.
+// Cor pelo aproveitamento nas avaliações (sem bônus: TP não mascara nota baixa).
 function discStatus(d) {
   const r = calcDisc(d);
   if (r.dist === 0) return '';
-  const pct = (r.earned / r.dist) * 100;
+  const pct = (r.earnedBase / r.dist) * 100;
   if (pct >= 70) return 'ok';
   if (pct >= 60) return 'warn';
   return 'danger';
 }
 
-function tpBonusForDisc(discId) {
-  if (!per().tp || per().tp.value == null || per().tp.applyTo !== discId) return 0;
-  return Math.round(per().tp.value * 10);
+// Onde o TP caiu e quanto dele de fato contou (o teto de 100 corta o resto).
+function tpHintHTML(bonus) {
+  const tp = per().tp;
+  const disc = per().disciplinas.find(d => d.id === tp.applyTo);
+  if (!disc) return 'nota ' + fmtNum(tp.value, 3) + ' — <strong>sem disciplina selecionada</strong>';
+  const r = calcDisc(disc);
+  const corte = bonus - r.tpBonus;
+  return 'nota ' + fmtNum(tp.value, 3) + ' → <strong>' + escapeHTML(disc.nome) + '</strong> ('
+    + fmtNum(r.earned, 1) + '/' + fmtNum(r.total, 0) + ')'
+    + (corte > 0.01 ? ' · ' + fmtNum(corte, 1) + ' pts perdidos no teto de ' + fmtNum(r.total, 0) : '');
 }
 
-function calcDiscOficialOnly(d) {
-  const ap1Slot = d.ap1 && !d.ap1.expectativa ? d.ap1 : { value: null, expectativa: false };
-  const ap2Slot = d.ap2 && !d.ap2.expectativa ? d.ap2 : { value: null, expectativa: false };
-  const asSlot = d.as && !d.as.expectativa ? d.as : { value: null, expectativa: false, taken: d.as ? d.as.taken : false };
-  const oficialAcs = (d.acs || []).map(ac => {
-    if (d.acMode === 'equal') {
-      return { ...ac };
-    }
-    if (ac.expectativa) return { ...ac, value: null };
-    return { ...ac };
-  });
-  const dummy = { ...d, ap1: ap1Slot, ap2: ap2Slot, as: asSlot, acs: oficialAcs };
-  return calcDisc(dummy);
+// Largura de barra: v como % do total da disciplina, clampado.
+function larg(v, total) {
+  return total > 0 ? Math.max(0, Math.min(100, (v / total) * 100)) : 0;
+}
+
+// Badges dos bônus já dentro da nota (TP e extras efetivos, pós-teto).
+function bonusBadges(r, curto) {
+  let h = '';
+  if (r.tpBonus > 0) h += ' <span class="tp-badge">+' + fmtNum(r.tpBonus, 1) + (curto ? '' : ' TP') + '</span>';
+  if (r.extrasBonus > 0) h += ' <span class="tp-badge extra">+' + fmtNum(r.extrasBonus, 1) + (curto ? '' : ' extra') + '</span>';
+  return h;
 }
 
 // ───────── NAVEGAÇÃO ─────────
@@ -1024,9 +1173,10 @@ function renderHomeStars() {
   ringFill.setAttribute('stroke-dashoffset', String(offset));
 
   // hero/ring class modifiers
+  const garantido = p.n > 0 && calcStarsProbability(p).state === 'locked';
   let heroMod = '';
   if (!p.starsEligible) heroMod = 'out';
-  else if (p.n > 0 && p.totalOficial >= p.starsNeeded) heroMod = 'in';
+  else if (garantido) heroMod = 'in';
   hero.className = 'stars-hero' + (heroMod ? ' ' + heroMod : '');
   ring.className = 'stars-ring' + (heroMod ? ' ' + heroMod : '');
 
@@ -1034,7 +1184,7 @@ function renderHomeStars() {
   if (!p.starsEligible) {
     statusEl.textContent = 'Fora do Stars';
     statusEl.className = 'stars-status out';
-  } else if (p.n > 0 && p.totalOficial >= p.starsNeeded) {
+  } else if (garantido) {
     statusEl.textContent = 'No Stars';
     statusEl.className = 'stars-status in';
   } else {
@@ -1048,10 +1198,12 @@ function renderHomeStars() {
   } else if (p.anyAS) {
     hintEl.innerHTML = 'você fez AS — não pode mais pegar o Stars neste período';
   } else if (!p.enrolledOk) {
-    const falta = 4 - p.n;
+    const falta = STARS_MIN_DISC - p.n;
     hintEl.innerHTML = 'precisa estar matriculado em ao menos <strong>4 disciplinas</strong> (falta ' + falta + ')';
-  } else if (p.totalOficial >= p.starsNeeded) {
+  } else if (garantido) {
     hintEl.innerHTML = 'você garantiu o Stars com ' + Math.round(p.totalOficial) + ' pontos oficiais';
+  } else if (p.totalOficial >= p.starsNeeded) {
+    hintEl.innerHTML = 'pontos oficiais acima da meta, mas alguma disciplina ainda não bateu 70';
   } else if (p.totalScore >= p.starsNeeded) {
     hintEl.innerHTML = 'projeção em <strong>' + Math.round(p.totalScore) + '</strong> — acima da meta, falta virar oficial';
   } else {
@@ -1101,10 +1253,7 @@ function renderHomeStars() {
     const bonus = Math.round(per().tp.value * 10);
     const expBadge = per().tp.expectativa ? ' <span class="badge-exp">prev</span>' : '';
     tpBonusEl.innerHTML = bonus + ' pts' + expBadge;
-    const disc = per().disciplinas.find(d => d.id === per().tp.applyTo);
-    tpHintEl.innerHTML = disc
-      ? 'nota ' + fmtNum(per().tp.value, 3) + ' → aplicado em <strong>' + escapeHTML(disc.nome) + '</strong>'
-      : 'nota ' + fmtNum(per().tp.value, 3) + ' — <strong>sem disciplina selecionada</strong>';
+    tpHintEl.innerHTML = tpHintHTML(bonus);
   } else {
     tpBonusEl.textContent = '— pts';
     tpHintEl.textContent = 'sem nota lançada';
@@ -1117,14 +1266,12 @@ function renderHomeStars() {
   } else {
     bdBody.innerHTML = per().disciplinas.map(d => {
       const r = calcDisc(d);
-      const tpB = tpBonusForDisc(d.id);
-      const earnedW = Math.max(0, Math.min(100, r.earned + tpB));
-      const distW = Math.max(0, Math.min(100, r.dist + tpB));
-      const tpBadge = tpB > 0 ? ' <span class="tp-badge">+' + tpB + ' TP</span>' : '';
+      const earnedW = larg(r.earned, r.total);
+      const distW = larg(Math.max(r.dist, r.earned), r.total);
       return '<div class="bd-row">'
         + '<div class="bd-head">'
-        + '<span class="bd-name">' + escapeHTML(d.nome) + tpBadge + '</span>'
-        + '<span class="bd-val">' + fmtNum(r.earned, 1) + '/100</span>'
+        + '<span class="bd-name">' + escapeHTML(d.nome) + bonusBadges(r) + '</span>'
+        + '<span class="bd-val">' + fmtNum(r.earned, 1) + '/' + fmtNum(r.total, 0) + '</span>'
         + '</div>'
         + '<div class="bd-bar">'
         + '<div class="bd-dist" style="width:' + distW + '%"></div>'
@@ -1288,8 +1435,8 @@ function renderTrackExpVsOficial() {
         const all = calcDisc(d);
         const of = calcDiscOficialOnly(d);
         const expExtra = Math.max(0, all.earned - of.earned);
-        const ofW = Math.max(0, Math.min(100, of.earned));
-        const expW = Math.max(0, Math.min(100 - ofW, expExtra));
+        const ofW = larg(of.earned, all.total);
+        const expW = Math.max(0, Math.min(100 - ofW, larg(expExtra, all.total)));
         return '<div class="track-bar-row">'
           + '<div class="track-bar-head"><span>' + escapeHTML(d.nome) + '</span><span>' + fmtNum(of.earned, 0) + ' + ' + fmtNum(expExtra, 0) + '</span></div>'
           + '<div class="track-bar"><div class="track-bar-of" style="width:' + ofW + '%"></div><div class="track-bar-exp" style="left:' + ofW + '%;width:' + expW + '%"></div></div>'
@@ -1331,10 +1478,7 @@ function renderTrackAproveitamento() {
     } else {
       const items = per().disciplinas.map(d => {
         const r = calcDisc(d);
-        const tpB = tpBonusForDisc(d.id);
-        const e = r.earned + tpB;
-        const dist = r.dist + tpB;
-        const pct = dist > 0 ? (e / dist) * 100 : 0;
+        const pct = r.dist > 0 ? (r.earnedBase / r.dist) * 100 : 0;
         return { d, pct };
       }).sort((a, b) => b.pct - a.pct);
       apr.innerHTML = items.map(it =>
@@ -1425,9 +1569,9 @@ function renderTrackHistorico() {
 
         let melhor = null, pior = null;
         state.periodos.forEach(px => px.disciplinas.forEach(d => {
-          const rd = calcDisc(d);
-          if (rd.dist < 40) return; // ignora disciplina com pouca coisa lançada
-          const pcd = rd.earned / rd.dist;
+          const rd = calcDisc(d, {}, px);
+          if (rd.dist < 0.4 * rd.total) return; // ignora disciplina com pouca coisa lançada
+          const pcd = Math.min(1, rd.earned / rd.dist);
           if (!melhor || pcd > melhor.pct) melhor = { nome: d.nome, pct: pcd };
           if (!pior || pcd < pior.pct) pior = { nome: d.nome, pct: pcd };
         }));
@@ -1462,7 +1606,7 @@ function renderTrackTP() {
       const bonus = Math.round(per().tp.value * 10);
       const disc = per().disciplinas.find(x => x.id === per().tp.applyTo);
       tpEl.innerHTML = '<div class="track-tp-line"><strong>+' + bonus + ' pts</strong> em ' + (disc ? escapeHTML(disc.nome) : '<em>sem disciplina</em>') + '</div>'
-        + '<div class="track-tp-line muted">nota bruta ' + fmtNum(per().tp.value, 3) + '</div>';
+        + '<div class="track-tp-line muted">' + tpHintHTML(bonus) + '</div>';
     }
   }
 }
@@ -1490,8 +1634,7 @@ function renderTrackProfs() {
     } else {
       profs.innerHTML = per().disciplinas.map(d => {
         const r = calcDisc(d);
-        const tpB = tpBonusForDisc(d.id);
-        const score = r.dist > 0 ? (r.earned + tpB) / (r.dist + tpB) * 100 : 0;
+        const score = r.dist > 0 ? Math.min(100, (r.earned / r.dist) * 100) : 0;
         let emoji, msg;
         if (score >= 90) { emoji = '😍'; msg = 'te ama'; }
         else if (score >= 80) { emoji = '😊'; msg = 'te curte'; }
@@ -1541,18 +1684,19 @@ function renderTrackDesespero(p, aprov) {
 }
 
 function renderTrackSobreviver(p, aprov) {
-  // Chance de sobreviver ao período
+  // Chance de sobreviver ao período = passar em todas sem AS, pelo modelo.
+  // Sem nota lançada cai nas faixas antigas por aproveitamento (sem jitter).
   const sob = document.getElementById('track-sobreviver');
   if (sob) {
     let chance;
-    if (p.n === 0) chance = 50;
+    const mc = p.distReg > 0 ? projecaoPeriodo() : null;
+    if (mc) chance = Math.round(Math.max(0, Math.min(100, 100 - mc.pReprova)));
+    else if (p.n === 0) chance = 50;
     else if (aprov >= 85) chance = 98;
     else if (aprov >= 70) chance = 85;
     else if (aprov >= 55) chance = 60;
     else if (aprov >= 40) chance = 35;
     else chance = 12;
-    const jitter = Math.floor(Math.random() * 5) - 2;
-    chance = Math.max(1, Math.min(99, chance + jitter));
     let msg;
     if (chance >= 90) msg = 'praticamente garantido. relaxa.';
     else if (chance >= 70) msg = 'tá no caminho. mantém o ritmo.';
@@ -1574,8 +1718,8 @@ function renderHomeRegistro() {
   const summary = document.getElementById('reg-summary');
   if (summary) {
     const p = calcPeriodo();
-    const pct = p.total > 0 ? Math.round(p.earnedReg / p.total * 100) : 0;
-    const starsOk = p.starsEligible && p.totalOficial >= (p.starsNeeded || EMPTY_STARS_DEN);
+    const pct = p.aprov !== null ? Math.round(p.aprov) : 0;
+    const starsOk = p.starsEligible && calcStarsProbability(p).state === 'locked';
     summary.innerHTML = ''
       + '<div class="reg-sum-item"><span class="reg-sum-num">' + fmtNum(p.totalScore, 0) + '</span><span class="reg-sum-lbl">pontos</span></div>'
       + '<div class="reg-sum-item"><span class="reg-sum-num">' + pct + '%</span><span class="reg-sum-lbl">aproveitamento</span></div>'
@@ -1608,13 +1752,9 @@ function renderHomeRegistro() {
     } else {
       prog.innerHTML = per().disciplinas.map(d => {
         const r = calcDisc(d);
-        const tpB = tpBonusForDisc(d.id);
-        const e = r.earned + tpB;
-        const dist = r.dist + tpB;
-        const w = Math.max(0, Math.min(100, e));
-        const tpBadge = tpB > 0 ? ' <span class="tp-badge">+' + tpB + '</span>' : '';
+        const w = larg(r.earned, r.total);
         return '<div class="reg-row">'
-          + '<div class="reg-row-head"><span>' + escapeHTML(d.nome) + tpBadge + '</span><span>' + fmtNum(e, 0) + '/100</span></div>'
+          + '<div class="reg-row-head"><span>' + escapeHTML(d.nome) + bonusBadges(r, true) + '</span><span>' + fmtNum(r.earned, 0) + '/' + fmtNum(r.total, 0) + '</span></div>'
           + '<div class="reg-bar"><div class="reg-bar-fill" style="width:' + w + '%"></div></div>'
           + '</div>';
       }).join('');
@@ -1705,14 +1845,13 @@ function resumoPeriodoHTML(p) {
   const r = calcPeriodo({}, p);
   if (r.n === 0) return '<p class="hint">período sem disciplinas.</p>';
   const rows = p.disciplinas.map(d => {
-    const rd = calcDisc(d);
-    const tpB = p.tp && p.tp.applyTo === d.id && p.tp.value != null ? Math.round(p.tp.value * 10) : 0;
-    const pct = rd.dist > 0 ? (rd.earned / rd.dist) * 100 : null;
-    return '<tr><td>' + escapeHTML(d.nome) + (tpB > 0 ? ' <span class="tp-badge">+' + tpB + ' TP</span>' : '') + '</td>'
-      + '<td>' + fmtNum(rd.earned, 1) + '<span class="per-res-dim">/100</span></td>'
+    const rd = calcDisc(d, {}, p);
+    const pct = rd.dist > 0 ? (rd.earnedBase / rd.dist) * 100 : null;
+    return '<tr><td>' + escapeHTML(d.nome) + bonusBadges(rd) + '</td>'
+      + '<td>' + fmtNum(rd.earned, 1) + '<span class="per-res-dim">/' + fmtNum(rd.total, 0) + '</span></td>'
       + '<td>' + (pct !== null ? fmtNum(pct, 0) + '%' : '—') + '</td></tr>';
   }).join('');
-  const starsOk = r.enrolledOk && !r.anyAS && r.totalOficial >= r.starsNeeded;
+  const starsOk = r.enrolledOk && !r.anyAS && calcStarsProbability(r, p).state === 'locked';
   const starsTxt = r.anyAS ? 'fora (AS oficial)'
     : !r.enrolledOk ? 'não elegível (menos de 4 disciplinas)'
     : starsOk ? 'conquistado ✦' : fmtNum(r.totalScore, 0) + ' de ' + r.starsNeeded + ' pts';
@@ -1722,7 +1861,7 @@ function resumoPeriodoHTML(p) {
     + '<div class="per-res-tot">'
     + '<span>total <strong>' + fmtNum(r.totalScore, 0) + '</strong> pts</span>'
     + '<span>aproveitamento <strong>' + (r.aprov !== null ? fmtNum(r.aprov, 1) + '%' : '—') + '</strong></span>'
-    + '<span>CR equivalente <strong>' + (r.aprov !== null ? fmtNum(r.aprov / 10, 2) : '—') + '</strong></span>'
+    + '<span>CR equivalente <strong>' + (crEquivPeriodo(p) !== null ? fmtNum(crEquivPeriodo(p), 2) : '—') + '</strong></span>'
     + '<span>stars: <strong>' + starsTxt + '</strong></span>'
     + '</div>'
     + '</div>';
@@ -1776,6 +1915,13 @@ function handlePeriodoAction(action, perId) {
 
 // ───────── RENDER: DISCIPLINAS ─────────
 
+// "AP1 40 · AP2 40 · AC 20" — a estrutura da disciplina numa linha.
+function resumoEstrutura(d) {
+  const partes = d.provas.map(pv => pv.nome + ' ' + fmtNum(pv.max, 1));
+  if (d.acPool > 0) partes.push('AC ' + fmtNum(d.acPool, 1));
+  return partes.join(' · ');
+}
+
 function renderDisciplinas() {
   const lista = document.getElementById('lista-disciplinas');
   if (per().disciplinas.length === 0) {
@@ -1784,18 +1930,17 @@ function renderDisciplinas() {
   }
   lista.innerHTML = per().disciplinas.map(d => {
     const r = calcDisc(d);
-    const tpB = tpBonusForDisc(d.id);
     const status = discStatus(d);
-    const pct = r.dist > 0 ? (r.earned / r.dist * 100) : 0;
-    const metaDist = fmtNum(r.dist, 0);
-    const metaEarned = fmtNum(r.earned, 1);
-    const tpBadge = tpB > 0 ? ' <span class="tp-badge">+' + tpB + ' TP</span>' : '';
+    const pct = r.dist > 0 ? (r.earnedBase / r.dist * 100) : 0;
+    const meta = r.dist > 0
+      ? fmtNum(r.dist, 0) + ' de ' + fmtNum(r.total, 0) + ' lançados · ' + fmtNum(pct, 0) + '%'
+      : 'nada lançado · ' + escapeHTML(resumoEstrutura(d));
     return '<li class="disc-item ' + status + '" data-id="' + d.id + '">'
       + '<div class="disc-info">'
-      + '<div class="disc-nome">' + escapeHTML(d.nome) + tpBadge + '</div>'
-      + '<div class="disc-meta">' + metaEarned + '/' + metaDist + ' lançados · ' + fmtNum(pct, 0) + '%</div>'
+      + '<div class="disc-nome">' + escapeHTML(d.nome) + bonusBadges(r) + '</div>'
+      + '<div class="disc-meta">' + meta + '</div>'
       + '</div>'
-      + '<div class="disc-pts">' + fmtNum(r.earned, 0) + '<span class="disc-pts-max"> / 100</span></div>'
+      + '<div class="disc-pts">' + fmtNum(r.earned, 1) + '<span class="disc-pts-max"> / ' + fmtNum(r.total, 0) + '</span></div>'
       + '<div class="disc-chevron">›</div>'
       + '</li>';
   }).join('');
@@ -1811,15 +1956,19 @@ function openDetalhe(id) {
   goto('s-detalhe');
 }
 
+function discAtual() {
+  return per().disciplinas.find(x => x.id === currentDiscId) || null;
+}
+
 function gradeDisplay(slot, max) {
-  if (!slot || slot.value === null || slot.value === undefined) {
-    return '<div class="grade-display empty">— <span class="grade-max">/ ' + max + '</span></div>';
+  if (!slot || !hasVal(slot.value)) {
+    return '<div class="grade-display empty">— <span class="grade-max">/ ' + fmtNum(max, 1) + '</span></div>';
   }
   const expClass = slot.expectativa ? 'exp' : '';
   const badge = slot.expectativa ? '<span class="badge-exp">prev</span>' : '';
   return '<div class="grade-display ' + expClass + '">'
     + fmtNum(slot.value, 1)
-    + ' <span class="grade-max">/ ' + max + '</span>'
+    + ' <span class="grade-max">/ ' + fmtNum(max, 1) + '</span>'
     + badge
     + '</div>';
 }
@@ -1831,18 +1980,16 @@ function gradeActions(tipo) {
     + '</div>';
 }
 
-// Auto-trigger da AS: com todas as notas lançadas e earned < 70, liga showAS
-// uma vez; limpar alguma nota re-arma o gatilho. Roda nas mutações de nota/AC
-// via saveDisc — nunca no render, que precisa ficar puro (sem write em disco).
+// Auto-trigger da AS: com todas as notas lançadas e nota final (TP e extras
+// inclusos) abaixo de 70%, liga showAS uma vez; limpar alguma nota re-arma o
+// gatilho. Roda nas mutações via saveDisc — nunca no render.
 function syncAsAutoTrigger(d) {
   const acsAssigned = (d.acs || []).every(ac => {
     if ((d.acMode || 'custom') === 'equal') return ac.delivered === true || ac.delivered === false;
-    return ac.value !== null && ac.value !== undefined;
+    return hasVal(ac.value);
   });
-  const allGradesAssigned = d.ap1.value !== null && d.ap1.value !== undefined
-    && d.ap2.value !== null && d.ap2.value !== undefined
-    && acsAssigned;
-  if (allGradesAssigned && !d.asAutoTriggered && calcDisc(d).earned < APROVACAO_MIN) {
+  const allGradesAssigned = d.provas.every(pv => hasVal(pv.value)) && acsAssigned;
+  if (allGradesAssigned && !d.asAutoTriggered && calcDisc(d).earned < APROV_FRAC * discTotal(d)) {
     d.showAS = true;
     d.asAutoTriggered = true;
   } else if (!allGradesAssigned && d.asAutoTriggered) {
@@ -1855,31 +2002,89 @@ function saveDisc(d) {
   saveState();
 }
 
+// Linha "pra chegar em X": quanto do que falta a disciplina precisa render.
+function metaLinha(rotulo, alvo, atual, livre) {
+  const falta = alvo - atual;
+  let val, cls = '';
+  if (falta <= 1e-9) { val = 'já garantido'; cls = 'success'; }
+  else if (falta > livre + 1e-9) { val = livre > 0 ? 'fora de alcance' : 'não chegou'; cls = 'danger'; }
+  else {
+    const pct = (falta / livre) * 100;
+    val = fmtNum(falta, 1) + ' de ' + fmtNum(livre, 1) + ' (' + fmtNum(pct, 0) + '%)';
+    cls = pct > 90 ? 'danger' : pct > 75 ? 'warning' : '';
+  }
+  return '<div class="det-proj-row"><span>' + rotulo + '</span><span class="det-proj-val ' + cls + '">' + val + '</span></div>';
+}
+
+// Projeção da disciplina: quanto precisa no que falta (determinístico) +
+// nota final esperada e chances pelo modelo do período.
+function renderDetProjecao(d, r) {
+  const card = document.getElementById('det-proj');
+  const body = document.getElementById('det-proj-body');
+  if (!card || !body) return;
+  const livre = slotsDisc(d).reduce((s, sl) => s + sl.max, 0);
+  const atual = r.earned;
+  let html = metaLinha('pra passar (' + fmtNum(APROV_FRAC * r.total, 0) + ')', APROV_FRAC * r.total, atual, livre)
+    + metaLinha('pra 9,0 (' + fmtNum(STARS_FRAC * r.total, 0) + ')', STARS_FRAC * r.total, atual, livre);
+
+  if (livre > 0.01) {
+    const mc = projecaoPeriodo();
+    const idx = per().disciplinas.indexOf(d);
+    const pd = mc && idx >= 0 ? mc.perDisc[idx] : null;
+    if (pd) {
+      html += '<div class="det-proj-grid">'
+        + '<div class="det-ins"><span class="det-ins-label">nota final esperada</span>'
+        + '<span class="det-ins-val">' + fmtNum(pd.mean, 1) + '</span>'
+        + '<span class="det-ins-sub">faixa ' + fmtNum(pd.p10, 0) + '–' + fmtNum(pd.p90, 0) + '</span></div>'
+        + '<div class="det-ins"><span class="det-ins-label">passar direto</span>'
+        + '<span class="det-ins-val ' + (pd.pApprov >= 90 ? 'success' : pd.pApprov < 60 ? 'danger' : '') + '">' + fmtPct(pd.pApprov) + '%</span>'
+        + '<span class="det-ins-sub">sem AS</span></div>'
+        + '<div class="det-ins"><span class="det-ins-label">fechar ≥ 9,0</span>'
+        + '<span class="det-ins-val ' + (pd.pNove >= 60 ? 'success' : pd.pNove < 20 ? 'danger' : '') + '">' + fmtPct(pd.pNove) + '%</span>'
+        + '<span class="det-ins-sub">' + (r.dist > 0 ? 'pelo seu rendimento' : 'sem notas: histórico/prior') + '</span></div>'
+        + '</div>';
+    }
+  } else {
+    html += '<p class="det-proj-fim">disciplina fechada em <strong>' + fmtNum(r.earned, 1) + '</strong>'
+      + (r.earned >= STARS_FRAC * r.total ? ' · acima de 9,0' : r.earned >= APROV_FRAC * r.total ? ' · aprovada' : ' · abaixo de 70') + '</p>';
+  }
+  card.hidden = false;
+  body.innerHTML = html;
+}
+
 function renderDetalhe() {
-  const d = per().disciplinas.find(x => x.id === currentDiscId);
+  const d = discAtual();
   if (!d) { goto('s-disciplinas'); return; }
 
-  const tpB = tpBonusForDisc(d.id);
-  document.getElementById('det-nome').innerHTML =
-    escapeHTML(d.nome) + (tpB > 0 ? ' <span class="tp-badge">+' + tpB + ' TP</span>' : '');
-
   const r = calcDisc(d);
+  document.getElementById('det-nome').textContent = d.nome;
+  document.getElementById('det-bonus').innerHTML = bonusBadges(r);
   document.getElementById('det-earned').textContent = fmtNum(r.earned, 1);
-  document.getElementById('det-dist').textContent = fmtNum(r.dist, 0);
-  const pct = r.dist > 0 ? (r.earned / r.dist * 100) : 0;
+  document.getElementById('det-total').textContent = fmtNum(r.total, 0);
+  const pct = r.dist > 0 ? (r.earnedBase / r.dist * 100) : 0;
   const detBar = document.getElementById('det-bar');
-  detBar.style.width = Math.max(0, Math.min(100, r.earned + tpB)) + '%';
+  detBar.style.width = larg(r.earned, r.total) + '%';
   if (r.dist === 0) detBar.className = 'bar-fill';
   else if (pct >= 70) detBar.className = 'bar-fill success';
   else if (pct >= 60) detBar.className = 'bar-fill warning';
   else detBar.className = 'bar-fill danger';
 
-  document.getElementById('det-status').textContent =
-    r.dist === 0 ? 'sem notas'
-    : pct >= 70 ? 'aproveitamento ' + fmtNum(pct, 1) + '% · dentro da média'
-    : pct >= 60 ? 'aproveitamento ' + fmtNum(pct, 1) + '% · abaixo da média'
-    : 'aproveitamento ' + fmtNum(pct, 1) + '% · muito abaixo';
+  const partes = [];
+  if (r.dist === 0) partes.push('sem notas · ' + escapeHTML(resumoEstrutura(d)));
+  else {
+    partes.push(fmtNum(r.dist, 0) + ' de ' + fmtNum(r.total, 0) + ' lançados');
+    partes.push('aproveitamento ' + fmtNum(pct, 1) + '%');
+  }
+  if (r.bonus > 0) {
+    const b = [];
+    if (r.tpBonus > 0) b.push(fmtNum(r.tpBonus, 1) + ' do TP');
+    if (r.extrasBonus > 0) b.push(fmtNum(r.extrasBonus, 1) + ' extra');
+    partes.push('inclui ' + b.join(' + '));
+  }
+  if (r.bonusRaw - r.bonus > 0.01) partes.push(fmtNum(r.bonusRaw - r.bonus, 1) + ' de bônus perdidos no teto');
+  document.getElementById('det-status').textContent = partes.join(' · ');
 
+  renderDetProjecao(d, r);
   renderDetInsights(d);
 
   const chk = document.getElementById('chk-show-as');
@@ -1892,10 +2097,18 @@ function renderDetalhe() {
     };
   }
 
-  document.getElementById('row-ap1').innerHTML = gradeDisplay(d.ap1, 40) + gradeActions('ap1');
-  document.getElementById('row-ap2').innerHTML = gradeDisplay(d.ap2, 40) + gradeActions('ap2');
+  // Avaliações (dinâmicas: AP1/AP2, AT, o que a estrutura tiver)
+  document.getElementById('det-provas').innerHTML = d.provas.map(pv =>
+    '<div class="section">'
+    + '<div class="section-title">' + escapeHTML(pv.nome) + ' <span class="section-max">máx ' + fmtNum(pv.max, 1) + '</span></div>'
+    + '<div class="grade-row">' + gradeDisplay(pv, pv.max) + gradeActions(pv.id) + '</div>'
+    + '</div>'
+  ).join('');
 
-  // ACs — mode toggle
+  // ACs — some se a estrutura não tem pool nem AC nenhuma
+  const pool = d.acPool || 0;
+  const secAc = document.getElementById('sec-ac');
+  secAc.hidden = pool <= 0 && d.acs.length === 0;
   const acMode = d.acMode || 'custom';
   const toggleEl = document.getElementById('ac-mode-toggle');
   toggleEl.querySelectorAll('.ac-mode-btn').forEach(btn => {
@@ -1907,18 +2120,17 @@ function renderDetalhe() {
   if (acMode === 'equal') {
     const n = d.acs.length;
     acMaxEl.textContent = n > 0
-      ? 'máx 20 total · ' + fmtNum(20 / n, 1) + ' cada'
-      : 'máx 20 total · split igual';
+      ? 'máx ' + fmtNum(pool, 1) + ' total · ' + fmtNum(pool / n, 1) + ' cada'
+      : 'máx ' + fmtNum(pool, 1) + ' total · split igual';
   } else {
-    acMaxEl.textContent = 'máx 20 total';
+    acMaxEl.textContent = 'máx ' + fmtNum(pool, 1) + ' total';
   }
 
-  // ACs — list
   const listaAcs = document.getElementById('lista-acs');
   if (d.acs.length === 0) {
     listaAcs.innerHTML = '<li class="empty">nenhuma atividade complementar</li>';
   } else if (acMode === 'equal') {
-    const share = AC_POOL / d.acs.length;
+    const share = pool / d.acs.length;
     listaAcs.innerHTML = d.acs.map(ac => {
       let cls, label;
       if (ac.delivered === true) { cls = 'delivered'; label = 'entregue'; }
@@ -1935,7 +2147,7 @@ function renderDetalhe() {
     }).join('');
   } else {
     listaAcs.innerHTML = d.acs.map(ac => {
-      const has = ac.value !== null && ac.value !== undefined;
+      const has = hasVal(ac.value);
       const cls = !has ? 'empty' : (ac.expectativa ? 'exp' : '');
       const badge = ac.expectativa ? '<span class="badge-exp">prev</span>' : '';
       const display = has ? fmtNum(ac.value, 1) : '—';
@@ -1950,36 +2162,67 @@ function renderDetalhe() {
     }).join('');
   }
 
-  if (d.acs.length > 0) {
-    listaAcs.querySelectorAll('[data-ac-edit]').forEach(el => {
-      el.addEventListener('click', () => openModalAcGrade(el.dataset.acEdit));
-    });
-    listaAcs.querySelectorAll('[data-ac-del]').forEach(el => {
-      el.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (confirm('Excluir atividade?')) {
-          const acDelId = el.dataset.acDel;
-          d.acs = d.acs.filter(a => a.id !== acDelId);
-          if (simState.disc && simState.disc[d.id] && simState.disc[d.id].acs) {
-            delete simState.disc[d.id].acs[acDelId];
-          }
-          saveDisc(d);
-          renderDetalhe();
+  listaAcs.querySelectorAll('[data-ac-edit]').forEach(el => {
+    el.addEventListener('click', () => openModalAcGrade(el.dataset.acEdit));
+  });
+  listaAcs.querySelectorAll('[data-ac-del]').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (confirm('Excluir atividade?')) {
+        const acDelId = el.dataset.acDel;
+        d.acs = d.acs.filter(a => a.id !== acDelId);
+        if (simState.disc && simState.disc[d.id] && simState.disc[d.id].acs) {
+          delete simState.disc[d.id].acs[acDelId];
         }
-      });
+        saveDisc(d);
+        renderDetalhe();
+      }
     });
-  }
+  });
 
-  // AS visibility — user toggle (showAS) é a fonte de verdade pra "pré-completude".
-  // asAutoTriggered já liga showAS uma vez quando todas as notas caem abaixo de 70.
-  // Se AS foi lançada (oficial ou previsão), mostra sempre.
+  // Pontos extras (bônus somado na nota, teto no total — igual ao TP)
+  const listaEx = document.getElementById('lista-extras');
+  if (!d.extras.length) {
+    listaEx.innerHTML = '<li class="empty">nenhum ponto extra</li>';
+  } else {
+    listaEx.innerHTML = d.extras.map(ex => {
+      const has = hasVal(ex.value);
+      const cls = !has ? 'empty' : (ex.expectativa ? 'exp' : '');
+      const badge = ex.expectativa ? '<span class="badge-exp">prev</span>' : '';
+      return '<li class="ac-item">'
+        + '<div class="ac-body">'
+        + '<div class="ac-nome">' + escapeHTML(ex.nome) + ' ' + badge + '</div>'
+        + '<div class="ac-val">bônus direto na nota</div>'
+        + '</div>'
+        + '<div class="ac-grade ' + cls + '" data-ex-edit="' + ex.id + '">' + (has ? '+' + fmtNum(ex.value, 1) : '—') + '</div>'
+        + '<button class="ac-del" data-ex-del="' + ex.id + '" aria-label="excluir">×</button>'
+        + '</li>';
+    }).join('');
+  }
+  listaEx.querySelectorAll('[data-ex-edit]').forEach(el => {
+    el.addEventListener('click', () => openModalExtra(el.dataset.exEdit));
+  });
+  listaEx.querySelectorAll('[data-ex-del]').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!confirm('Excluir ponto extra?')) return;
+      d.extras = d.extras.filter(x => x.id !== el.dataset.exDel);
+      saveDisc(d);
+      renderDetalhe();
+    });
+  });
+
+  // AS: showAS (toggle do usuário ou auto-trigger) ou nota já lançada mostram
+  // a seção. Sem avaliação na estrutura não existe AS.
+  const asM = asMaxDisc(d);
+  document.getElementById('sec-as').hidden = asM <= 0;
+  document.getElementById('det-as-toggle').hidden = asM <= 0;
   const rowAS = document.getElementById('row-as');
   const asInfo = document.getElementById('as-info');
-  const forceShow = d.showAS === true;
-  if (forceShow || d.as.taken || d.as.value !== null) {
+  if (d.showAS === true || d.as.taken || d.as.value !== null) {
     rowAS.hidden = false;
     asInfo.style.display = 'none';
-    rowAS.innerHTML = gradeDisplay(d.as, 40) + gradeActions('as');
+    rowAS.innerHTML = gradeDisplay(d.as, asM) + gradeActions('as');
     if (d.as.taken) {
       rowAS.innerHTML += '<div class="hint" style="margin-left:8px">Stars perdido</div>';
     }
@@ -1988,13 +2231,27 @@ function renderDetalhe() {
     asInfo.style.display = 'block';
   }
 
-  // Bind grade action buttons
   document.querySelectorAll('#s-detalhe [data-action="set-expectativa"], #s-detalhe [data-action="set-oficial"]').forEach(btn => {
     btn.addEventListener('click', () => openModalGrade(btn.dataset.tipo, btn.dataset.action === 'set-expectativa'));
   });
 }
 
 // ───────── RENDER: SIMULADOR ─────────
+
+function ensureSim(discId) {
+  if (!simState.disc) simState.disc = {};
+  if (!simState.disc[discId]) simState.disc[discId] = {};
+  const o = simState.disc[discId];
+  if (!o.acs) o.acs = {};
+  if (!o.provas) o.provas = {};
+  return o;
+}
+
+// Pool de AC ainda sem atividade criada (vira o campo "AC restante").
+function acRestante(d) {
+  if ((d.acMode || 'custom') === 'equal') return d.acs.length === 0 ? (d.acPool || 0) : 0;
+  return Math.max(0, (d.acPool || 0) - d.acs.reduce((s, ac) => s + (ac.valor || 0), 0));
+}
 
 function renderSimulador() {
   const body = document.getElementById('sim-body');
@@ -2006,20 +2263,12 @@ function renderSimulador() {
 
   body.innerHTML = per().disciplinas.map(d => renderSimDisc(d)).join('');
 
-  const ensureSim = (discId) => {
-    if (!simState.disc) simState.disc = {};
-    if (!simState.disc[discId]) simState.disc[discId] = { acs: {} };
-    if (!simState.disc[discId].acs) simState.disc[discId].acs = {};
-    return simState.disc[discId];
-  };
-
   const refreshDiscScore = (discId) => {
     const d = per().disciplinas.find(x => x.id === discId);
     if (!d) return;
-    const simD = simState.disc[discId] || {};
-    const r = calcDisc(d, simD);
+    const r = calcDisc(d, simState.disc[discId] || {});
     const scoreEl = document.querySelector('.sim-disc[data-disc="' + discId + '"] .sim-disc-score');
-    if (scoreEl) scoreEl.textContent = fmtNum(r.earned, 1) + '/100';
+    if (scoreEl) scoreEl.textContent = fmtNum(r.earned, 1) + '/' + fmtNum(r.total, 0);
   };
 
   body.querySelectorAll('input[type="number"][data-disc]').forEach(inp => {
@@ -2028,20 +2277,16 @@ function renderSimulador() {
       const discId = inp.dataset.disc;
       const key = inp.dataset.key;
       const simD = ensureSim(discId);
-      const raw = inp.value;
-      let val = raw === '' ? undefined : parseFloat(raw);
+      let val = inp.value === '' ? undefined : parseFloat(inp.value);
       if (val !== undefined && !isNaN(val)) {
         const mx = parseFloat(inp.max);
         const clamped = Math.min(isNaN(mx) ? val : mx, Math.max(0, val));
         if (clamped !== val) { val = clamped; inp.value = String(val); }
       }
-      if (key.startsWith('ac_')) {
-        simD.acs[key.slice(3)] = isNaN(val) ? undefined : val;
-      } else if (key === 'acExtra') {
-        simD.acExtra = isNaN(val) ? undefined : val;
-      } else {
-        simD[key] = isNaN(val) ? undefined : val;
-      }
+      const v = val === undefined || isNaN(val) ? undefined : val;
+      if (key.startsWith('ac_')) simD.acs[key.slice(3)] = v;
+      else if (key.startsWith('pv_')) simD.provas[key.slice(3)] = v;
+      else if (key === 'acExtra') simD.acExtra = v;
       refreshDiscScore(discId);
       updateSimResult();
     });
@@ -2050,18 +2295,14 @@ function renderSimulador() {
   body.querySelectorAll('.sim-toggle[data-disc]').forEach(btn => {
     btn.addEventListener('click', () => {
       if (btn.classList.contains('locked')) return;
-      const discId = btn.dataset.disc;
+      const simD = ensureSim(btn.dataset.disc);
       const acId = btn.dataset.ac;
-      const simD = ensureSim(discId);
       const cur = simD.acs[acId];
-      let next;
-      if (cur === undefined) next = true;
-      else if (cur === true) next = false;
-      else next = undefined;
+      const next = cur === undefined ? true : cur === true ? false : undefined;
       simD.acs[acId] = next;
       btn.className = 'sim-toggle' + (next === true ? ' on' : next === false ? ' off' : '');
       btn.textContent = next === true ? 'entregue' : next === false ? 'não entregue' : '—';
-      refreshDiscScore(discId);
+      refreshDiscScore(btn.dataset.disc);
       updateSimResult();
     });
   });
@@ -2074,14 +2315,9 @@ function renderSimDisc(d) {
   const r = calcDisc(d, simD);
   const mode = d.acMode || 'custom';
 
-  const field = (key, label, max, realSlot) => {
-    const realVal = realSlot && realSlot.value !== null && realSlot.value !== undefined ? realSlot.value : null;
-    const simVal = key.startsWith('ac_')
-      ? (simD.acs && simD.acs[key.slice(3)])
-      : simD[key];
-    const displayVal = realVal !== null
-      ? fmtNum(realVal, 1)
-      : (simVal !== undefined && simVal !== null && !isNaN(simVal) ? simVal : '');
+  const field = (key, label, max, realSlot, simVal) => {
+    const realVal = realSlot && hasVal(realSlot.value) ? realSlot.value : null;
+    const displayVal = realVal !== null ? fmtNum(realVal, 1) : (hasVal(simVal) ? simVal : '');
     const readonly = realVal !== null ? 'readonly' : '';
     const placeholder = realVal !== null ? fmtNum(realVal, 1) : '—';
     return '<div class="sim-field">'
@@ -2091,70 +2327,63 @@ function renderSimDisc(d) {
       + ' value="' + displayVal + '"'
       + ' placeholder="' + placeholder + '"'
       + ' ' + readonly + '>'
-      + '<span class="sim-max">/ ' + max + '</span>'
+      + '<span class="sim-max">/ ' + fmtNum(max, 1) + '</span>'
       + '</div>';
   };
 
+  const provaFields = d.provas.map(pv =>
+    field('pv_' + pv.id, escapeHTML(pv.nome), pv.max, pv, simD.provas && simD.provas[pv.id])
+  ).join('');
+
   let acFields = '';
-  let realAcDist = 0;
   if (mode === 'equal') {
-    const n = d.acs.length;
-    const share = n > 0 ? 20 / n : 0;
+    const share = d.acs.length > 0 ? (d.acPool || 0) / d.acs.length : 0;
     acFields = d.acs.map(ac => {
       const real = ac.delivered;
       const locked = real === true || real === false;
       const sim = simD.acs && simD.acs[ac.id];
-      let state, label;
+      let st, label;
       if (locked) {
-        state = real === true ? 'on' : 'off';
+        st = real === true ? 'on' : 'off';
         label = real === true ? 'entregue' : 'não entregue';
-      } else if (sim === true) { state = 'on'; label = 'entregue'; }
-      else if (sim === false) { state = 'off'; label = 'não entregue'; }
-      else { state = ''; label = '—'; }
+      } else if (sim === true) { st = 'on'; label = 'entregue'; }
+      else if (sim === false) { st = 'off'; label = 'não entregue'; }
+      else { st = ''; label = '—'; }
       return '<div class="sim-field sim-field-toggle">'
         + '<label>' + escapeHTML(ac.nome) + '</label>'
-        + '<button type="button" class="sim-toggle ' + state + (locked ? ' locked' : '') + '"'
+        + '<button type="button" class="sim-toggle ' + st + (locked ? ' locked' : '') + '"'
         + ' data-disc="' + d.id + '" data-ac="' + ac.id + '">' + label + '</button>'
         + '<span class="sim-max">' + fmtNum(share, 1) + ' pts</span>'
         + '</div>';
     }).join('');
   } else {
-    acFields = d.acs.map(ac => field('ac_' + ac.id, escapeHTML(ac.nome), ac.valor, ac)).join('');
+    acFields = d.acs.map(ac => field('ac_' + ac.id, escapeHTML(ac.nome), ac.valor, ac, simD.acs && simD.acs[ac.id])).join('');
   }
 
-  // AC restante: pts for ACs not yet created.
-  // Custom: 20 - sum(valor de ACs existentes). Equal: 20 só quando não há AC nenhuma
-  // (com >=1 AC no modo igual, os toggles já cobrem todo o pool).
-  let restante;
-  if (mode === 'equal') {
-    restante = d.acs.length === 0 ? 20 : 0;
-  } else {
-    const acValorSum = d.acs.reduce((s, ac) => s + (ac.valor || 0), 0);
-    restante = Math.max(0, 20 - acValorSum);
-  }
+  const restante = acRestante(d);
   let restanteSection = '';
   if (restante > 0.01) {
-    const simExtra = simD.acExtra !== undefined && simD.acExtra !== null && !isNaN(simD.acExtra)
-      ? simD.acExtra : '';
     restanteSection = '<div class="sim-field sim-field-extra">'
       + '<label>AC restante</label>'
       + '<input type="number" step="0.5" min="0" max="' + restante.toFixed(2) + '"'
       + ' data-disc="' + d.id + '" data-key="acExtra"'
-      + ' value="' + simExtra + '" placeholder="0">'
+      + ' value="' + (hasVal(simD.acExtra) ? simD.acExtra : '') + '" placeholder="0">'
       + '<span class="sim-max">/ ' + fmtNum(restante, 1) + '</span>'
       + '</div>'
       + '<p class="sim-extra-hint">pontos de AC ainda por criar ou lançar</p>';
   }
 
+  const bonusTxt = r.bonus > 0 ? '<p class="sim-extra-hint">inclui ' + fmtNum(r.bonus, 1) + ' de bônus (TP/extras)</p>' : '';
+
   return '<div class="sim-disc" data-disc="' + d.id + '">'
     + '<div class="sim-disc-head">'
     + '<div class="sim-disc-nome">' + escapeHTML(d.nome) + '</div>'
-    + '<div class="sim-disc-score">' + fmtNum(r.earned, 1) + '/100</div>'
+    + '<div class="sim-disc-score">' + fmtNum(r.earned, 1) + '/' + fmtNum(r.total, 0) + '</div>'
     + '</div>'
-    + field('ap1', 'AP1', 40, d.ap1)
-    + field('ap2', 'AP2', 40, d.ap2)
+    + provaFields
     + acFields
     + restanteSection
+    + bonusTxt
     + '</div>';
 }
 
@@ -2172,16 +2401,24 @@ function updateSimResult() {
     hint.textContent = 'sem disciplinas';
     return;
   }
+  // Disciplina completa no cenário e abaixo de 70 = AS = fora do Stars.
+  const abaixo = per().disciplinas.filter(d => {
+    const r = calcDisc(d, (simState.disc && simState.disc[d.id]) || {});
+    return r.dist >= r.total - 0.01 && r.earned < APROV_FRAC * r.total - 1e-9;
+  }).map(d => d.nome);
+
   if (!p.starsEligible) {
     bar.className = 'bar-fill danger';
-    hint.innerHTML = 'AS feita — inelegível pro Stars';
+    hint.innerHTML = p.anyAS ? 'AS feita — inelegível pro Stars' : 'menos de ' + STARS_MIN_DISC + ' disciplinas — inelegível pro Stars';
+  } else if (abaixo.length) {
+    bar.className = 'bar-fill danger';
+    hint.innerHTML = '<strong>' + escapeHTML(abaixo.join(', ')) + '</strong> fecha abaixo de 70 nesse cenário — AS elimina do Stars';
   } else if (p.totalScore >= p.starsNeeded) {
     bar.className = 'bar-fill success';
     hint.innerHTML = 'Stars garantido com <strong>' + fmtNum(p.totalScore, 0) + '</strong> pts';
   } else {
     bar.className = 'bar-fill accent';
-    const falta = p.starsNeeded - p.totalScore;
-    hint.innerHTML = 'faltam <strong>' + fmtNum(falta, 1) + '</strong> pts pro Stars';
+    hint.innerHTML = 'faltam <strong>' + fmtNum(p.starsNeeded - p.totalScore, 1) + '</strong> pts pro Stars';
   }
 }
 
@@ -2232,74 +2469,238 @@ function wireModalClear(onClear, rerender) {
   });
 }
 
+function kindRadios(expectativa) {
+  return '<div class="radio-group" id="m-kind">'
+    + '<label class="' + (!expectativa ? 'selected' : '') + '"><input type="radio" name="kind" value="oficial" ' + (!expectativa ? 'checked' : '') + '>oficial</label>'
+    + '<label class="' + (expectativa ? 'selected' : '') + '"><input type="radio" name="kind" value="expectativa" ' + (expectativa ? 'checked' : '') + '>previsão</label>'
+    + '</div>';
+}
+
+function kindEscolhido() {
+  const checked = document.querySelector('input[name="kind"]:checked');
+  return checked ? checked.value : 'oficial';
+}
+
 // Fechar modal: bind único (elementos estáticos; rebind por abertura vazava listeners)
 document.querySelectorAll('#modal [data-close]').forEach(el => {
   el.addEventListener('click', () => { document.getElementById('modal').hidden = true; });
 });
 
-function openModalAddDisc() {
+// Modal de estrutura: cria disciplina (com presets) ou edita a de uma
+// existente. Avaliações + pool de AC têm que somar o total da disciplina.
+function openModalEstrutura(d) {
+  const novo = !d;
+  let linhas = novo
+    ? PRESETS.padrao.provas.map(([nome, max]) => ({ id: null, nome, max }))
+    : d.provas.map(pv => ({ id: pv.id, nome: pv.nome, max: pv.max }));
+
+  const presets = novo
+    ? '<div class="est-presets" id="m-presets">'
+      + Object.entries(PRESETS).map(([k, pr]) =>
+        '<button type="button" class="est-preset' + (k === 'padrao' ? ' on' : '') + '" data-preset="' + k + '">' + escapeHTML(pr.label) + '</button>').join('')
+      + '</div>'
+    : '';
+
   openModal(
-    'nova disciplina',
+    novo ? 'nova disciplina' : 'estrutura · ' + d.nome,
     '<label>nome'
-    + '<input type="text" id="m-nome" placeholder="ex: POO" autofocus>'
-    + '</label>',
-    () => {
-      const nome = document.getElementById('m-nome').value.trim();
-      if (!nome) { alert('Nome obrigatório'); return false; }
-      per().disciplinas.push({
-        id: uid(),
-        nome,
-        ap1: { value: null, expectativa: false },
-        ap2: { value: null, expectativa: false },
-        as: { value: null, expectativa: false, taken: false },
-        acs: [],
-        acMode: 'custom',
-        showAS: false
-      });
-      saveState();
-      renderDisciplinas();
-      renderHome();
-      return true;
-    }
+    + '<input type="text" id="m-nome" placeholder="ex: POO" value="' + (novo ? '' : escapeHTML(d.nome)) + '">'
+    + '</label>'
+    + presets
+    + '<div class="est-bloco">'
+    + '<div class="est-head"><span>avaliações</span><span>pontos</span></div>'
+    + '<div id="m-provas" class="est-list"></div>'
+    + '<button type="button" class="btn secondary sm" id="m-add-prova">+ avaliação</button>'
+    + '</div>'
+    + '<label>pool de ACs (pontos)'
+    + '<input type="number" id="m-acpool" step="0.5" min="0" max="' + DISC_TOTAL + '" value="' + (novo ? PRESETS.padrao.acPool : d.acPool) + '">'
+    + '</label>'
+    + (novo
+      ? '<label>criar ACs de valor igual agora'
+        + '<input type="number" id="m-nacs" step="1" min="0" max="20" value="' + PRESETS.padrao.nAcs + '" placeholder="0">'
+        + '</label>'
+      : '')
+    + '<p class="est-soma" id="m-soma"></p>'
+    + '<p class="form-hint">avaliações + pool de AC somam ' + DISC_TOTAL + '. a AS substitui a avaliação de pior fração e é lançada na escala da maior avaliação.</p>',
+    () => salvarEstrutura(d, lerLinhas())
   );
+
+  const listEl = document.getElementById('m-provas');
+  function desenhar() {
+    listEl.innerHTML = linhas.map((l, i) =>
+      '<div class="est-row" data-i="' + i + '">'
+      + '<input type="text" class="est-nome" value="' + escapeHTML(l.nome) + '" aria-label="nome da avaliação">'
+      + '<input type="number" class="est-max" step="0.5" min="0.5" max="' + DISC_TOTAL + '" value="' + l.max + '" aria-label="pontos">'
+      + '<button type="button" class="est-del" aria-label="remover">×</button>'
+      + '</div>').join('');
+    atualizarSoma();
+  }
+  function lerLinhas() {
+    return Array.from(listEl.querySelectorAll('.est-row')).map(row => {
+      const i = Number(row.dataset.i);
+      return {
+        id: linhas[i].id,
+        nome: row.querySelector('.est-nome').value.trim(),
+        max: parseFloat(row.querySelector('.est-max').value)
+      };
+    });
+  }
+  function atualizarSoma() {
+    const soma = lerLinhas().reduce((s, l) => s + (isNaN(l.max) ? 0 : l.max), 0)
+      + (parseFloat(document.getElementById('m-acpool').value) || 0);
+    const el = document.getElementById('m-soma');
+    const ok = Math.abs(soma - DISC_TOTAL) < 0.01;
+    el.className = 'est-soma ' + (ok ? 'ok' : 'bad');
+    el.textContent = 'soma: ' + fmtNum(soma, 1) + ' / ' + DISC_TOTAL
+      + (ok ? ' ✓' : soma < DISC_TOTAL ? ' · faltam ' + fmtNum(DISC_TOTAL - soma, 1) : ' · sobram ' + fmtNum(soma - DISC_TOTAL, 1));
+  }
+
+  listEl.addEventListener('input', atualizarSoma);
+  document.getElementById('m-acpool').addEventListener('input', atualizarSoma);
+  listEl.addEventListener('click', e => {
+    const del = e.target.closest('.est-del');
+    if (!del) return;
+    linhas = lerLinhas();
+    linhas.splice(Number(del.parentNode.dataset.i), 1);
+    desenhar();
+  });
+  document.getElementById('m-add-prova').addEventListener('click', () => {
+    linhas = lerLinhas();
+    linhas.push({ id: null, nome: 'Avaliação ' + (linhas.length + 1), max: 0 });
+    desenhar();
+  });
+  const presetsEl = document.getElementById('m-presets');
+  if (presetsEl) presetsEl.addEventListener('click', e => {
+    const b = e.target.closest('[data-preset]');
+    if (!b) return;
+    const pr = PRESETS[b.dataset.preset];
+    linhas = pr.provas.map(([nome, max]) => ({ id: null, nome, max }));
+    document.getElementById('m-acpool').value = pr.acPool;
+    document.getElementById('m-nacs').value = pr.nAcs;
+    presetsEl.querySelectorAll('.est-preset').forEach(x => x.classList.toggle('on', x === b));
+    desenhar();
+  });
+  desenhar();
+  if (novo) document.getElementById('m-nome').focus();
 }
 
-function openModalGrade(tipo, isExpectativa) {
-  const d = per().disciplinas.find(x => x.id === currentDiscId);
-  if (!d) return;
-  const slot = d[tipo];
-  const max = AP_MAX;
-  const kindLabel = isExpectativa ? 'previsão' : 'oficial';
-  const labels = { ap1: 'AP1', ap2: 'AP2', as: 'AS' };
+function salvarEstrutura(d, linhas) {
+  const nome = document.getElementById('m-nome').value.trim();
+  const pool = parseFloat(document.getElementById('m-acpool').value) || 0;
+  if (!nome) { alert('Nome obrigatório'); return false; }
+  if (linhas.some(l => !l.nome)) { alert('Toda avaliação precisa de nome.'); return false; }
+  if (linhas.some(l => isNaN(l.max) || l.max <= 0)) { alert('Toda avaliação precisa valer mais que 0.'); return false; }
+  if (pool < 0) { alert('Pool de AC não pode ser negativo.'); return false; }
+  if (!linhas.length && pool <= 0) { alert('A disciplina precisa de pelo menos uma avaliação ou pool de AC.'); return false; }
+  const soma = linhas.reduce((s, l) => s + l.max, 0) + pool;
+  if (Math.abs(soma - DISC_TOTAL) > 0.01) {
+    alert('Avaliações + pool de AC somam ' + fmtNum(soma, 1) + '. Precisa fechar em ' + DISC_TOTAL + '.');
+    return false;
+  }
 
-  const warnMsg = (tipo === 'as' && !isExpectativa)
+  if (!d) {
+    const nAcs = Math.max(0, Math.min(20, parseInt(document.getElementById('m-nacs').value, 10) || 0));
+    if (nAcs > 0 && pool <= 0) { alert('Sem pool de AC não dá pra criar ACs.'); return false; }
+    per().disciplinas.push({
+      id: uid(),
+      nome,
+      provas: linhas.map(l => ({ id: 'pv-' + uid(), nome: l.nome, max: l.max, value: null, expectativa: false })),
+      acPool: pool,
+      as: { value: null, expectativa: false, taken: false },
+      acs: Array.from({ length: nAcs }, (_, i) => ({
+        id: uid(), nome: 'AC ' + (i + 1), valor: Math.round((pool / nAcs) * 100) / 100,
+        value: null, expectativa: false, delivered: null
+      })),
+      acMode: 'custom',
+      extras: [],
+      showAS: false,
+      asAutoTriggered: false
+    });
+    saveState();
+    renderDisciplinas();
+    renderHome();
+    return true;
+  }
+
+  // Edição: nada lançado pode ficar acima do novo máximo.
+  for (const l of linhas) {
+    const pv = l.id && d.provas.find(x => x.id === l.id);
+    if (pv && hasVal(pv.value) && pv.value > l.max + 1e-9) {
+      alert(l.nome + ' já tem nota ' + fmtNum(pv.value, 1) + ', acima do novo máximo de ' + fmtNum(l.max, 1) + '.');
+      return false;
+    }
+  }
+  const removidas = d.provas.filter(pv => !linhas.some(l => l.id === pv.id) && hasVal(pv.value));
+  if (removidas.length && !confirm('Remover ' + removidas.map(pv => pv.nome).join(', ') + ' apaga a nota lançada. Continuar?')) return false;
+  const acAlocado = d.acMode === 'equal' ? 0 : d.acs.reduce((s, ac) => s + (ac.valor || 0), 0);
+  if (acAlocado > pool + 1e-9) {
+    alert('As ACs já somam ' + fmtNum(acAlocado, 1) + ' pts, acima do novo pool de ' + fmtNum(pool, 1) + '. Ajuste ou exclua ACs antes.');
+    return false;
+  }
+  const novoAsMax = linhas.reduce((m, l) => Math.max(m, l.max), 0);
+  if (hasVal(d.as.value) && d.as.value > novoAsMax + 1e-9) {
+    alert('A AS lançada (' + fmtNum(d.as.value, 1) + ') passa da nova escala da AS (' + fmtNum(novoAsMax, 1) + '). Limpe a AS antes.');
+    return false;
+  }
+
+  d.nome = nome;
+  d.provas = linhas.map(l => {
+    const pv = l.id && d.provas.find(x => x.id === l.id);
+    return pv
+      ? Object.assign(pv, { nome: l.nome, max: l.max })
+      : { id: 'pv-' + uid(), nome: l.nome, max: l.max, value: null, expectativa: false };
+  });
+  d.acPool = pool;
+  if (simState.disc) delete simState.disc[d.id];
+  saveDisc(d);
+  renderDetalhe();
+  return true;
+}
+
+function openModalAddDisc() {
+  openModalEstrutura(null);
+}
+
+// tipo = id da avaliação ou 'as'
+function openModalGrade(tipo, isExpectativa) {
+  const d = discAtual();
+  if (!d) return;
+  const isAS = tipo === 'as';
+  const pv = isAS ? null : d.provas.find(x => x.id === tipo);
+  if (!isAS && !pv) return;
+  const slot = isAS ? d.as : pv;
+  const max = isAS ? asMaxDisc(d) : pv.max;
+  const label = isAS ? 'AS' : pv.nome;
+  const kindLabel = isExpectativa ? 'previsão' : 'oficial';
+
+  const warnMsg = (isAS && !isExpectativa)
     ? '<p class="form-hint">Atenção: marcar AS oficial elimina sua elegibilidade ao Stars.</p>'
     : '';
-  const clearBtn = (slot.value !== null && slot.value !== undefined)
+  const clearBtn = hasVal(slot.value)
     ? '<button type="button" class="btn sm danger" id="m-clear">limpar nota</button>'
     : '';
 
   openModal(
-    kindLabel + ' · ' + labels[tipo] + ' · ' + d.nome,
-    '<label>nota (0 a ' + max + ')'
-    + '<input type="number" id="m-grade" step="0.1" min="0" max="' + max + '" value="' + (slot.value !== null && slot.value !== undefined ? slot.value : '') + '" autofocus>'
+    kindLabel + ' · ' + label + ' · ' + d.nome,
+    '<label>nota (0 a ' + fmtNum(max, 1) + ')'
+    + '<input type="number" id="m-grade" step="0.1" min="0" max="' + max + '" value="' + (hasVal(slot.value) ? slot.value : '') + '" autofocus>'
     + '</label>'
     + warnMsg
     + clearBtn,
     () => {
       const v = parseFloat(document.getElementById('m-grade').value);
       if (isNaN(v) || v < 0 || v > max) {
-        alert('Nota inválida. Entre 0 e ' + max);
+        alert('Nota inválida. Entre 0 e ' + fmtNum(max, 1));
         return false;
       }
       slot.value = v;
       slot.expectativa = isExpectativa;
-      if (tipo === 'as') slot.taken = !isExpectativa;
+      if (isAS) slot.taken = !isExpectativa;
       pushRecente({
         discId: d.id,
         discNome: d.nome,
         tipo,
-        label: labels[tipo],
+        label,
         valor: v,
         max,
         kind: isExpectativa ? 'expectativa' : 'oficial'
@@ -2313,13 +2714,13 @@ function openModalGrade(tipo, isExpectativa) {
   wireModalClear(() => {
     slot.value = null;
     slot.expectativa = false;
-    if (tipo === 'as') slot.taken = false;
+    if (isAS) slot.taken = false;
     saveDisc(d);
   });
 }
 
 function setAcMode(mode) {
-  const d = per().disciplinas.find(x => x.id === currentDiscId);
+  const d = discAtual();
   if (!d) return;
   const current = d.acMode || 'custom';
   if (current === mode) return;
@@ -2330,7 +2731,7 @@ function setAcMode(mode) {
     });
   } else {
     const n = d.acs.length;
-    const share = n > 0 ? 20 / n : 0;
+    const share = n > 0 ? (d.acPool || 0) / n : 0;
     d.acs.forEach(ac => {
       if (!ac.valor || ac.valor <= 0) ac.valor = share;
     });
@@ -2341,14 +2742,14 @@ function setAcMode(mode) {
 }
 
 function openModalAcGrade(acId) {
-  const d = per().disciplinas.find(x => x.id === currentDiscId);
+  const d = discAtual();
   if (!d) return;
   const ac = d.acs.find(a => a.id === acId);
   if (!ac) return;
 
   const mode = d.acMode || 'custom';
   if (mode === 'equal') {
-    const share = d.acs.length > 0 ? AC_POOL / d.acs.length : 0;
+    const share = d.acs.length > 0 ? (d.acPool || 0) / d.acs.length : 0;
     const clearBtn = (ac.delivered === true || ac.delivered === false)
       ? '<button type="button" class="btn sm danger" id="m-clear">limpar status</button>'
       : '';
@@ -2389,19 +2790,16 @@ function openModalAcGrade(acId) {
     return;
   }
 
-  const clearBtn = (ac.value !== null && ac.value !== undefined)
+  const clearBtn = hasVal(ac.value)
     ? '<button type="button" class="btn sm danger" id="m-clear">limpar nota</button>'
     : '';
 
   openModal(
     'lançar · ' + ac.nome,
-    '<label>nota (0 a ' + ac.valor + ')'
-    + '<input type="number" id="m-grade" step="0.1" min="0" max="' + ac.valor + '" value="' + (ac.value !== null && ac.value !== undefined ? ac.value : '') + '" autofocus>'
+    '<label>nota (0 a ' + fmtNum(ac.valor, 1) + ')'
+    + '<input type="number" id="m-grade" step="0.1" min="0" max="' + ac.valor + '" value="' + (hasVal(ac.value) ? ac.value : '') + '" autofocus>'
     + '</label>'
-    + '<div class="radio-group" id="m-kind">'
-    + '<label class="' + (!ac.expectativa ? 'selected' : '') + '"><input type="radio" name="kind" value="oficial" ' + (!ac.expectativa ? 'checked' : '') + '>oficial</label>'
-    + '<label class="' + (ac.expectativa ? 'selected' : '') + '"><input type="radio" name="kind" value="expectativa" ' + (ac.expectativa ? 'checked' : '') + '>previsão</label>'
-    + '</div>'
+    + kindRadios(ac.expectativa)
     + clearBtn,
     () => {
       const v = parseFloat(document.getElementById('m-grade').value);
@@ -2409,8 +2807,7 @@ function openModalAcGrade(acId) {
         alert('Nota inválida.');
         return false;
       }
-      const checked = document.querySelector('input[name="kind"]:checked');
-      const kind = checked ? checked.value : 'oficial';
+      const kind = kindEscolhido();
       ac.value = v;
       ac.expectativa = kind === 'expectativa';
       pushRecente({
@@ -2430,7 +2827,6 @@ function openModalAcGrade(acId) {
   );
 
   wireRadioLabels('#m-kind label');
-
   wireModalClear(() => {
     ac.value = null;
     ac.expectativa = false;
@@ -2439,19 +2835,19 @@ function openModalAcGrade(acId) {
 }
 
 function openModalAddAc() {
-  const d = per().disciplinas.find(x => x.id === currentDiscId);
+  const d = discAtual();
   if (!d) return;
   const mode = d.acMode || 'custom';
+  const pool = d.acPool || 0;
 
   if (mode === 'equal') {
     const nAfter = d.acs.length + 1;
-    const shareAfter = AC_POOL / nAfter;
     openModal(
       'nova atividade (AC)',
       '<label>nome'
       + '<input type="text" id="m-nome" placeholder="ex: lista 1" autofocus>'
       + '</label>'
-      + '<p class="form-hint">split igual: depois de adicionar, cada uma vale ' + fmtNum(shareAfter, 1) + ' pts (' + nAfter + ' atividades).</p>',
+      + '<p class="form-hint">split igual: depois de adicionar, cada uma vale ' + fmtNum(pool / nAfter, 1) + ' pts (' + nAfter + ' atividades).</p>',
       () => {
         const nome = document.getElementById('m-nome').value.trim();
         if (!nome) { alert('Nome obrigatório'); return false; }
@@ -2464,8 +2860,7 @@ function openModalAddAc() {
     return;
   }
 
-  const usado = d.acs.reduce((s, a) => s + a.valor, 0);
-  const restante = Math.max(0, AC_POOL - usado);
+  const restante = acRestante(d);
 
   openModal(
     'nova atividade (AC)',
@@ -2473,9 +2868,9 @@ function openModalAddAc() {
     + '<input type="text" id="m-nome" placeholder="ex: lista 1" autofocus>'
     + '</label>'
     + '<label>valor máximo (pontos)'
-    + '<input type="number" id="m-valor" step="0.5" min="0" max="20" placeholder="' + (restante || '—') + '">'
+    + '<input type="number" id="m-valor" step="0.5" min="0" max="' + pool + '" placeholder="' + (restante || '—') + '">'
     + '</label>'
-    + '<p class="form-hint">restam ' + fmtNum(restante, 1) + ' pts do pool de 20 de AC.</p>',
+    + '<p class="form-hint">restam ' + fmtNum(restante, 1) + ' pts do pool de ' + fmtNum(pool, 1) + ' de AC.</p>',
     () => {
       const nome = document.getElementById('m-nome').value.trim();
       const valor = parseFloat(document.getElementById('m-valor').value);
@@ -2493,34 +2888,111 @@ function openModalAddAc() {
   );
 }
 
+// Ponto extra: bônus fora da distribuição (participação, ponto do professor,
+// trabalho extra). Soma direto na nota, com teto no total — igual ao TP.
+function openModalExtra(exId) {
+  const d = discAtual();
+  if (!d) return;
+  const ex = exId ? d.extras.find(x => x.id === exId) : null;
+  if (exId && !ex) return;
+  const total = discTotal(d);
+  const clearBtn = ex && hasVal(ex.value)
+    ? '<button type="button" class="btn sm danger" id="m-clear">limpar pontos</button>'
+    : '';
+
+  openModal(
+    ex ? 'extra · ' + ex.nome : 'novo ponto extra',
+    '<label>descrição'
+    + '<input type="text" id="m-nome" placeholder="ex: participação" value="' + (ex ? escapeHTML(ex.nome) : '') + '">'
+    + '</label>'
+    + '<label>pontos'
+    + '<input type="number" id="m-grade" step="0.1" min="0" max="' + total + '" value="' + (ex && hasVal(ex.value) ? ex.value : '') + '" placeholder="ex: 5">'
+    + '</label>'
+    + kindRadios(ex ? ex.expectativa : false)
+    + '<p class="form-hint">soma direto na nota da disciplina, fora da distribuição, com teto de ' + fmtNum(total, 0) + '. vazio = extra combinado mas ainda sem valor.</p>'
+    + clearBtn,
+    () => {
+      const nome = document.getElementById('m-nome').value.trim();
+      const raw = document.getElementById('m-grade').value;
+      if (!nome) { alert('Descrição obrigatória'); return false; }
+      const v = raw === '' ? null : parseFloat(raw);
+      if (v !== null && (isNaN(v) || v < 0 || v > total)) { alert('Pontos entre 0 e ' + fmtNum(total, 0)); return false; }
+      const kind = kindEscolhido();
+      const alvo = ex || { id: 'ex-' + uid() };
+      alvo.nome = nome;
+      alvo.value = v;
+      alvo.expectativa = kind === 'expectativa';
+      if (!ex) d.extras.push(alvo);
+      if (v !== null) {
+        pushRecente({
+          discId: d.id, discNome: d.nome, tipo: 'extra', exId: alvo.id,
+          label: 'Extra · ' + nome, valor: v, max: null, kind
+        });
+      }
+      saveDisc(d);
+      renderDetalhe();
+      return true;
+    }
+  );
+  wireRadioLabels('#m-kind label');
+  wireModalClear(() => {
+    ex.value = null;
+    ex.expectativa = false;
+    saveDisc(d);
+  });
+}
+
+// Sugestão de alvo do TP: a disciplina onde o bônus vira mais ponto de
+// verdade (menos corte no teto pela projeção) e, no empate, a com menor
+// chance de passar direto.
+function sugestaoTP(bonus) {
+  const mc = projecaoPeriodo();
+  if (!mc || !bonus) return null;
+  let best = null;
+  per().disciplinas.forEach((d, i) => {
+    const pd = mc.perDisc[i];
+    const r = calcDisc(d, { tp: null });
+    const folga = Math.max(0, r.total - (pd.mean - (per().tp.applyTo === d.id ? calcDisc(d).tpBonus : 0)));
+    const util = Math.min(bonus, folga);
+    if (!best || util > best.util + 0.05 || (Math.abs(util - best.util) <= 0.05 && pd.pApprov < best.pApprov)) {
+      best = { d, util, pApprov: pd.pApprov };
+    }
+  });
+  return best;
+}
+
 function openModalTP() {
+  const tp = per().tp;
+  const bonusAtual = hasVal(tp.value) ? Math.round(tp.value * 10) : 7;
+  const sug = sugestaoTP(bonusAtual);
   openModal(
     'teste de progresso',
     '<label>nota bruta (0 a 1)'
-    + '<input type="number" id="m-grade" step="0.001" min="0" max="1" value="' + (per().tp.value !== null && per().tp.value !== undefined ? per().tp.value : '') + '" placeholder="ex: 0.698" autofocus>'
+    + '<input type="number" id="m-grade" step="0.001" min="0" max="1" value="' + (hasVal(tp.value) ? tp.value : '') + '" placeholder="ex: 0.698" autofocus>'
     + '</label>'
-    + '<p class="form-hint">bônus = round(nota × 10) pontos, aplicado numa disciplina.</p>'
+    + '<p class="form-hint">bônus = round(nota × 10) pontos, somado na nota da disciplina alvo (teto de 100).</p>'
     + '<label>disciplina alvo'
     + '<select id="m-disc">'
     + '<option value="">— nenhuma —</option>'
-    + per().disciplinas.map(d =>
-        '<option value="' + d.id + '" ' + (per().tp.applyTo === d.id ? 'selected' : '') + '>' + escapeHTML(d.nome) + '</option>'
-      ).join('')
+    + per().disciplinas.map(d => {
+        const r = calcDisc(d, { tp: null });
+        return '<option value="' + d.id + '" ' + (tp.applyTo === d.id ? 'selected' : '') + '>'
+          + escapeHTML(d.nome) + ' · ' + fmtNum(r.earned, 1) + '/' + fmtNum(r.total, 0) + '</option>';
+      }).join('')
     + '</select>'
     + '</label>'
-    + '<div class="radio-group" id="m-kind">'
-    + '<label class="' + (!per().tp.expectativa ? 'selected' : '') + '"><input type="radio" name="kind" value="oficial" ' + (!per().tp.expectativa ? 'checked' : '') + '>oficial</label>'
-    + '<label class="' + (per().tp.expectativa ? 'selected' : '') + '"><input type="radio" name="kind" value="expectativa" ' + (per().tp.expectativa ? 'checked' : '') + '>previsão</label>'
-    + '</div>'
-    + ((per().tp.value !== null && per().tp.value !== undefined) ? '<button type="button" class="btn sm danger" id="m-clear">limpar TP</button>' : ''),
+    + (sug ? '<p class="form-hint">sugestão: <strong>' + escapeHTML(sug.d.nome) + '</strong>, onde a projeção aproveita '
+      + fmtNum(sug.util, 0) + ' dos ' + bonusAtual + ' pts sem bater no teto</p>' : '')
+    + kindRadios(tp.expectativa)
+    + (hasVal(tp.value) ? '<button type="button" class="btn sm danger" id="m-clear">limpar TP</button>' : ''),
     () => {
       const raw = document.getElementById('m-grade').value;
       if (raw === '') { alert('Nota obrigatória'); return false; }
       const v = parseFloat(raw);
       if (isNaN(v) || v < 0 || v > 1) { alert('Nota deve ser entre 0 e 1'); return false; }
       const applyTo = document.getElementById('m-disc').value || null;
-      const checked = document.querySelector('input[name="kind"]:checked');
-      const kind = checked ? checked.value : 'oficial';
+      const kind = kindEscolhido();
+      const antes = per().tp.applyTo;
       per().tp.value = v;
       per().tp.applyTo = applyTo;
       per().tp.expectativa = kind === 'expectativa';
@@ -2534,6 +3006,8 @@ function openModalTP() {
         max: 1,
         kind
       });
+      // TP mexe na nota final: re-avalia o gatilho da AS nas duas pontas.
+      per().disciplinas.forEach(d => { if (d.id === applyTo || d.id === antes) syncAsAutoTrigger(d); });
       saveState();
       renderHome();
       return true;
@@ -2543,7 +3017,9 @@ function openModalTP() {
   wireRadioLabels('#m-kind label');
 
   wireModalClear(() => {
+    const antes = per().tp.applyTo;
     per().tp = { value: null, expectativa: false, applyTo: null };
+    per().disciplinas.forEach(d => { if (d.id === antes) syncAsAutoTrigger(d); });
     saveState();
   }, renderHome);
 }
@@ -2574,6 +3050,11 @@ document.getElementById('btn-reset-periodo').addEventListener('click', () => {
 });
 document.getElementById('btn-edit-tp').addEventListener('click', openModalTP);
 document.getElementById('btn-add-ac').addEventListener('click', openModalAddAc);
+document.getElementById('btn-add-extra').addEventListener('click', () => openModalExtra(null));
+document.getElementById('btn-edit-estrutura').addEventListener('click', () => {
+  const d = discAtual();
+  if (d) openModalEstrutura(d);
+});
 
 document.getElementById('btn-del-disc').addEventListener('click', () => {
   const d = per().disciplinas.find(x => x.id === currentDiscId);
@@ -2597,25 +3078,17 @@ document.getElementById('btn-reset-sim').addEventListener('click', () => {
 document.getElementById('btn-fill-max-sim').addEventListener('click', () => {
   simState = { disc: {} };
   per().disciplinas.forEach(d => {
-    const o = { acs: {} };
-    if (d.ap1.value === null || d.ap1.value === undefined) o.ap1 = 40;
-    if (d.ap2.value === null || d.ap2.value === undefined) o.ap2 = 40;
-    const mode = d.acMode || 'custom';
-    let restante;
-    if (mode === 'equal') {
+    const o = ensureSim(d.id);
+    d.provas.forEach(pv => { if (!hasVal(pv.value)) o.provas[pv.id] = pv.max; });
+    if ((d.acMode || 'custom') === 'equal') {
       d.acs.forEach(ac => {
         if (ac.delivered !== true && ac.delivered !== false) o.acs[ac.id] = true;
       });
-      restante = d.acs.length === 0 ? 20 : 0;
     } else {
-      d.acs.forEach(ac => {
-        if (ac.value === null || ac.value === undefined) o.acs[ac.id] = ac.valor;
-      });
-      const acValorSum = d.acs.reduce((s, ac) => s + (ac.valor || 0), 0);
-      restante = Math.max(0, 20 - acValorSum);
+      d.acs.forEach(ac => { if (!hasVal(ac.value)) o.acs[ac.id] = ac.valor; });
     }
+    const restante = acRestante(d);
     if (restante > 0.01) o.acExtra = restante;
-    simState.disc[d.id] = o;
   });
   renderSimulador();
 });
