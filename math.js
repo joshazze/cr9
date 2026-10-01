@@ -331,19 +331,21 @@ const CR9Math = (() => {
     };
   }
 
-  // Priors fracos (força 5): prova centrada em 78%, AC em 90%. Quem usa um
-  // tracker de Stars está acima da média, e com 1 nota por disciplina um prior
-  // forte em 72% subestimava 0,6 pt por AP (tests/calibracao.js). κ e τ em grade
-  // com pesos ~log-normal; τ alto = disciplinas parecidas entre si.
+  // Priors quase planos (força 2): prova centrada em 80%, AC em 90%. Com
+  // força 5 o modelo encolhia quem tira 87% pra 83% e ficava pessimista no
+  // meio da curva (previa 45%, acontecia 67%, tests/calibracao.js θ 0,86).
+  // τ alto = disciplinas do mesmo aluno parecidas entre si (o efeito de
+  // disciplina real é de ~6 pts%), o que segura a variância de quem tem pouca
+  // nota. κ e τ em grade com pesos ~log-normal.
   const PROVA_CFG = {
-    a0: 3.9, b0: 1.1,
+    a0: 1.6, b0: 0.4,
     kappas: [4, 7, 12, 20, 35, 60], kappaW: [0.04, 0.1, 0.22, 0.28, 0.22, 0.14],
-    taus: [12, 30, 70, 160], tauW: [0.2, 0.35, 0.3, 0.15]
+    taus: [30, 70, 160, 400], tauW: [0.2, 0.35, 0.3, 0.15]
   };
   const AC_CFG = {
-    a0: 4.5, b0: 0.5,
+    a0: 1.8, b0: 0.2,
     kappas: [3, 6, 10, 18, 30], kappaW: [0.12, 0.22, 0.3, 0.24, 0.12],
-    taus: [10, 25, 60, 150], tauW: [0.2, 0.35, 0.3, 0.15]
+    taus: [25, 60, 150, 400], tauW: [0.2, 0.35, 0.3, 0.15]
   };
   const BIN_PRIOR = { a: 4.5, b: 0.5 };
 
@@ -360,7 +362,7 @@ const CR9Math = (() => {
   function starsProbability(inp) {
     const discs = inp.discs || [];
     const hist = inp.history || [];
-    const hw = inp.historyWeight === undefined ? 0.5 : inp.historyWeight;
+    const hw = inp.historyWeight === undefined ? 1 : inp.historyWeight;
     const minFrac = inp.minFrac === undefined ? 0.7 : inp.minFrac;
     const need = inp.need;
     const rng = mulberry32(inp.seed >>> 0);

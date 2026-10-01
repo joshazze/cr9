@@ -12,7 +12,8 @@ const M = require('../math.js');
 
 const N = Number(process.argv[2]) || 1200;
 const THETA = Number(process.argv[3]) || 0.80; // centro da população sintética
-const DRAWS = 4000;
+const DRAWS = Number(process.env.DRAWS) || 4000;
+const CFG = process.env.CFG ? JSON.parse(process.env.CFG) : {}; // overrides de experimento
 const rng = M.mulberry32(20260930);
 const gauss = () => M.sampleNormal(rng);
 const clip = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
@@ -84,9 +85,12 @@ function modeloNovo(a, seed, comHistorico) {
   const history = comHistorico
     ? a.passado.map(d => ({ prova: [d.ap1 / 40, d.ap2 / 40], ac: [d.ac1 / 10, d.ac2 / 10], bin: [] }))
     : [];
-  const r = M.starsProbability({ discs, history, need: 450, minFrac: 0.7, draws: DRAWS, seed });
+  const r = M.starsProbability(Object.assign({ discs, history, need: 450, minFrac: 0.7, draws: DRAWS, seed }, CFG));
+  if (comHistorico) reprovaPrevista.push(r.pReprova / 100);
   return r.pct / 100;
 }
+
+function CR9mean(a) { return a.reduce((s, v) => s + v, 0) / a.length; }
 
 function metricas(ps, ys) {
   const eps = 1e-4;
@@ -106,11 +110,13 @@ function metricas(ps, ys) {
   return { brier: brier / ps.length, logloss: ll / ps.length, ece, bins };
 }
 
+const reprovaPrevista = [];
 const alunos = Array.from({ length: N }, geraAluno);
 const ys = alunos.map(verdade);
 const t0 = Date.now();
-const pAnt = alunos.map((a, i) => modeloAntigo(a, i + 1));
-const pNovoSem = alunos.map((a, i) => modeloNovo(a, i + 1, false));
+const SO_NOVO = process.env.SO_NOVO === '1';
+const pAnt = SO_NOVO ? ys.map(() => 0.5) : alunos.map((a, i) => modeloAntigo(a, i + 1));
+const pNovoSem = SO_NOVO ? ys.map(() => 0.5) : alunos.map((a, i) => modeloNovo(a, i + 1, false));
 const pNovo = alunos.map((a, i) => modeloNovo(a, i + 1, true));
 const base = ys.reduce((s, v) => s + v, 0) / N;
 
@@ -124,6 +130,8 @@ const linhas = [
 linhas.forEach(([nome, m]) => {
   console.log(nome.padEnd(26) + ' brier ' + m.brier.toFixed(4) + ' · logloss ' + m.logloss.toFixed(4) + ' · ECE ' + m.ece.toFixed(4));
 });
+const reprovaReal = alunos.map(a => a.discs.some((d, i) => Math.min(100, d.ap1 + d.ap2 + d.ac1 + d.ac2 + (i === a.tpAlvo ? a.tp : 0)) < 70) ? 1 : 0);
+console.log('risco de reprova (v2 com histórico): previsto ' + (100 * CR9mean(reprovaPrevista)).toFixed(1) + '% · real ' + (100 * CR9mean(reprovaReal)).toFixed(1) + '% · brier ' + metricas(reprovaPrevista, reprovaReal).brier.toFixed(4));
 console.log('\ncalibração por faixa (previsto → real, n):');
 linhas.forEach(([nome, m]) => {
   console.log('  ' + nome);
