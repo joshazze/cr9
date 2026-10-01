@@ -126,4 +126,95 @@ ok('starsMonteCarlo orçamento de tempo (20k draws)', () => {
   assert.ok(dt < 120, 'demorou ' + dt + 'ms');
 });
 
+// ── Modelo hierárquico v2 ──
+
+// Disciplina padrão: AP1 lançada, AP2 + 2 ACs de 10 em aberto.
+function discPadrao(ap1, extra) {
+  return Object.assign({
+    total: 100, known: ap1, bonus: 0,
+    obs: { prova: [ap1 / 40], ac: [], bin: [] },
+    slots: [{ type: 'prova', max: 40 }, { type: 'ac', max: 10 }, { type: 'ac', max: 10 }]
+  }, extra || {});
+}
+const prob = (discs, o) => M.starsProbability(Object.assign({ discs, need: 90 * discs.length, draws: 6000, seed: 5 }, o));
+
+ok('lgamma bate com fatorial e Γ(1/2)', () => {
+  assert.ok(Math.abs(M.lgamma(5) - Math.log(24)) < 1e-10);
+  assert.ok(Math.abs(M.lgamma(0.5) - Math.log(Math.sqrt(Math.PI))) < 1e-10);
+  assert.ok(Math.abs(M.lbeta(2, 3) - Math.log(1 / 12)) < 1e-10);
+});
+
+ok('squeeze/unsqueeze são inversas e ficam dentro de (0,1)', () => {
+  [0, 0.25, 0.9, 1].forEach(y => {
+    const q = M.squeeze(y);
+    assert.ok(q > 0 && q < 1);
+    assert.ok(Math.abs(M.unsqueeze(q) - y) < 1e-12);
+  });
+});
+
+ok('starsProbability determinístico pela seed', () => {
+  const ds = [discPadrao(36), discPadrao(35), discPadrao(37), discPadrao(34)];
+  assert.strictEqual(prob(ds).pct, prob(ds).pct);
+});
+
+ok('nota maior nunca reduz a chance', () => {
+  const baixo = prob([discPadrao(33), discPadrao(33), discPadrao(33), discPadrao(33)]).pct;
+  const alto = prob([discPadrao(38), discPadrao(38), discPadrao(38), discPadrao(38)]).pct;
+  assert.ok(alto > baixo + 20, baixo + ' vs ' + alto);
+});
+
+ok('média projetada acompanha o rendimento observado (sem viés grosso)', () => {
+  // 10 provas a 90%: a próxima prova de 100 deve sair perto de 90
+  const d = { total: 100, known: 0, bonus: 0, obs: { prova: Array(10).fill(0.9), ac: [], bin: [] }, slots: [{ type: 'prova', max: 100 }] };
+  const r = M.starsProbability({ discs: [d], need: 0, minFrac: 0, draws: 20000, seed: 9 });
+  assert.ok(Math.abs(r.mean - 90) < 2.5, 'média ' + r.mean);
+});
+
+ok('bônus acima do teto não vira ponto', () => {
+  const cheia = { total: 100, known: 98, bonus: 7, obs: { prova: [1], ac: [], bin: [] }, slots: [] };
+  const r = M.starsProbability({ discs: [cheia], need: 0, draws: 1000, seed: 1 });
+  assert.strictEqual(r.perDisc[0].mean, 100);
+});
+
+ok('disciplina que não alcança 70 zera a chance (AS elimina)', () => {
+  const ruim = { total: 100, known: 20, bonus: 0, obs: { prova: [0.5], ac: [], bin: [] }, slots: [{ type: 'prova', max: 40 }] };
+  const r = prob([discPadrao(40), discPadrao(40), discPadrao(40), ruim], { need: 300 });
+  assert.strictEqual(r.pct, 0);
+  assert.strictEqual(r.perDisc[3].pApprov, 0);
+});
+
+ok('risco de reprovação entra na conta mesmo com total folgado', () => {
+  // 3 disciplinas cheias + uma no fio dos 70: o total passa, a aprovação não é certa
+  const cheia = { total: 100, known: 100, bonus: 0, obs: { prova: [1, 1], ac: [], bin: [] }, slots: [] };
+  const fio = { total: 100, known: 40, bonus: 0, obs: { prova: [0.75], ac: [], bin: [] }, slots: [{ type: 'prova', max: 40 }] };
+  const r = prob([cheia, cheia, cheia, fio], { need: 300 });
+  assert.ok(r.pReprova > 5 && r.pct < 95, 'reprova ' + r.pReprova + ' pct ' + r.pct);
+  assert.ok(Math.abs(r.pct + r.pReprova - 100) < 1e-9);
+});
+
+ok('histórico forte puxa a projeção de quem ainda não tem nota', () => {
+  const vazia = { total: 100, known: 0, bonus: 0, obs: { prova: [], ac: [], bin: [] }, slots: [{ type: 'prova', max: 100 }] };
+  const hBom = Array(6).fill({ prova: [0.95, 0.95], ac: [], bin: [] });
+  const hRuim = Array(6).fill({ prova: [0.6, 0.6], ac: [], bin: [] });
+  const bom = M.starsProbability({ discs: [vazia], history: hBom, need: 0, minFrac: 0, draws: 8000, seed: 3 }).mean;
+  const ruim = M.starsProbability({ discs: [vazia], history: hRuim, need: 0, minFrac: 0, draws: 8000, seed: 3 }).mean;
+  assert.ok(bom > 85 && ruim < 70, 'bom ' + bom + ' ruim ' + ruim);
+});
+
+ok('AC por entrega usa a taxa de entrega observada', () => {
+  const d = entregas => ({ total: 100, known: 0, bonus: 0, obs: { prova: [], ac: [], bin: entregas }, slots: [{ type: 'bin', max: 100 }] });
+  const quemEntrega = M.starsProbability({ discs: [d(Array(10).fill(1))], need: 0, minFrac: 0, draws: 8000, seed: 2 }).mean;
+  const quemFura = M.starsProbability({ discs: [d([1, 0, 0, 1, 0, 0, 0, 1, 0, 0])], need: 0, minFrac: 0, draws: 8000, seed: 2 }).mean;
+  assert.ok(quemEntrega > 85 && quemFura < 55, quemEntrega + ' vs ' + quemFura);
+});
+
+ok('starsProbability orçamento de tempo (6 disciplinas, 20k draws)', () => {
+  const ds = Array.from({ length: 6 }, (_, i) => discPadrao(30 + i));
+  const hist = Array(10).fill({ prova: [0.8, 0.85], ac: [0.9, 1], bin: [] });
+  const t0 = Date.now();
+  M.starsProbability({ discs: ds, history: hist, need: 540, draws: 20000, seed: 8 });
+  const dt = Date.now() - t0;
+  assert.ok(dt < 400, 'demorou ' + dt + 'ms');
+});
+
 console.log('\n' + passed + ' testes passaram.');
