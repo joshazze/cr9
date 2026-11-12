@@ -307,19 +307,41 @@
 
     <!-- SIMULADOR -->
     <div id="s-simulador" class="screen">
-      <h3 class="stitle">Simulador Stars</h3>
-      <p class="hint">preencha notas hipotéticas nos campos vazios. nada é salvo — é só pra ver o cenário.</p>
-      <div id="sim-body"></div>
-      <div class="metric-card">
-        <div class="metric-label">Simulação</div>
-        <div class="metric-value"><span id="sim-total">0</span><span class="metric-unit"> / <span id="sim-max">500</span></span></div>
-        <div class="bar"><div class="bar-fill" id="sim-bar"></div></div>
+      <div class="sim-top">
+        <h3 class="stitle">Simulador Stars</h3>
+        <button type="button" class="per-chip" id="sim-per-chip" data-per-switch></button>
+      </div>
+      <p class="hint">preencha notas hipotéticas nos campos vazios. nada é salvo, é só pra ver o cenário.</p>
+      <div class="sim-summary" id="sim-summary">
+        <div class="sim-sum-row">
+          <div class="metric-value"><span id="sim-total">0</span><span class="metric-unit"> / <span id="sim-max">500</span></span></div>
+          <div class="sim-sum-delta" id="sim-delta"></div>
+        </div>
+        <div class="sim-track" id="sim-track">
+          <div class="sim-track-real" id="sim-bar-real"></div>
+          <div class="sim-track-sim" id="sim-bar"></div>
+          <div class="sim-mark" id="sim-mark-stars"><span>Stars</span></div>
+        </div>
+        <div class="sim-legend">
+          <span><i class="lg-real"></i>oficial + previsões</span>
+          <span><i class="lg-sim"></i>simulado</span>
+        </div>
         <div class="metric-hint" id="sim-hint">—</div>
+        <div class="sim-need" id="sim-need"></div>
       </div>
-      <div class="btn-row">
-        <button class="btn secondary sm" id="btn-reset-sim">resetar</button>
-        <button class="btn sm" id="btn-fill-max-sim">preencher máximos</button>
+      <div class="sim-fill">
+        <div class="sim-fill-head">
+          <span class="sim-fill-label">preencher tudo que falta com</span>
+          <strong id="sim-fill-val">90%</strong>
+        </div>
+        <input type="range" id="sim-fill-range" min="0" max="100" step="5" value="90">
+        <div class="btn-row">
+          <button class="btn secondary sm" id="btn-reset-sim">resetar</button>
+          <button class="btn secondary sm" id="btn-fill-pct-sim">aplicar %</button>
+          <button class="btn sm" id="btn-fill-max-sim">máximos</button>
+        </div>
       </div>
+      <div id="sim-body"></div>
     </div>
 
     <!-- CONFIG -->

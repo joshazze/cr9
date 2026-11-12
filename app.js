@@ -4,7 +4,7 @@ const KEY = 'cr9-v1';
 const MAX_RECENTES = 12;
 const MAX_LANCAMENTOS = 500;
 // Bumpar junto com CACHE_NAME do sw.js a cada deploy.
-const APP_VERSION = 'v20';
+const APP_VERSION = 'v21';
 
 // Regras Ibmec/Stars: disciplina vale 100 pts. Estrutura padrão AP1(40) +
 // AP2(40) + pool de AC(20), mas cada disciplina pode ter a sua (ex.: AT 60 +
@@ -369,6 +369,17 @@ function migrateState(s) {
         if (typeof pv.max !== 'number' || !(pv.max > 0)) pv.max = AP_MAX;
         if (typeof pv.value !== 'number') pv.value = null;
         pv.expectativa = pv.expectativa === true;
+        // Composição opcional (ex.: AP2 = prova escrita 40 + pontos extras 4).
+        if (Array.isArray(pv.comp)) {
+          pv.comp = pv.comp.filter(c => c && typeof c === 'object' && typeof c.max === 'number' && c.max > 0);
+          pv.comp.forEach(c => {
+            if (!c.id) c.id = 'pc-' + uid();
+            if (typeof c.nome !== 'string' || !c.nome) c.nome = c.extra ? 'pontos extras' : 'prova';
+            c.extra = c.extra === true;
+            if (typeof c.value !== 'number') c.value = null;
+          });
+          if (!pv.comp.length) delete pv.comp;
+        } else delete pv.comp;
       });
       if (typeof d.acPool !== 'number' || !(d.acPool >= 0)) d.acPool = AC_POOL;
       if (!Array.isArray(d.extras)) d.extras = [];
@@ -490,6 +501,22 @@ function discTotal(d) {
   return d.provas.reduce((s, pv) => s + (pv.max || 0), 0) + (d.acPool || 0);
 }
 
+// Composição de avaliação: a nota da avaliação é a soma das partes, com teto
+// no máximo dela. Partes "extra" (pontos extras dentro da AP) só cobrem o que
+// faltou na parte principal; o que passar do teto se perde.
+function temComp(pv) { return Array.isArray(pv.comp) && pv.comp.length > 0; }
+function compNota(pv, vals) {
+  let soma = 0, algum = false;
+  pv.comp.forEach(c => {
+    const v = vals ? vals[c.id] : c.value;
+    if (hasVal(v)) { soma += v; algum = true; }
+  });
+  return algum ? Math.min(pv.max, soma) : null;
+}
+function compResumo(pv) {
+  return pv.comp.map(c => (c.extra ? '+' : '') + escapeHTML(c.nome) + ' ' + fmtNum(c.max, 1)).join(' · ');
+}
+
 // AS é lançada na escala da maior avaliação (40 no padrão, 60 numa AT de 60).
 // 0 = disciplina sem AS (escolha na estrutura): some da tela e do cálculo.
 function asMaxDisc(d) {
@@ -566,9 +593,10 @@ function calcDisc(d, ov = {}, periodo = per()) {
   }
 
   // Sim-only: "AC restante" hipotética (pontos de AC ainda não criadas).
+  // O pool restante inteiro conta como distribuído (17 de 20 = 3 perdidos).
   if (hasVal(ov.acExtra)) {
     acEarned += ov.acExtra;
-    acDist += ov.acExtra;
+    acDist += Math.max(ov.acExtra, acRestante(d));
   }
 
   const earnedBase = provaEarned + acEarned;
@@ -1861,6 +1889,8 @@ function fecharPeriodo() {
   renderConfig();
   renderDisciplinas();
   renderHome();
+  const tela = document.querySelector('.screen.active');
+  if (tela && tela.id === 's-simulador') renderSimulador();
 }
 
 function resumoPeriodoHTML(p) {
@@ -1889,6 +1919,57 @@ function resumoPeriodoHTML(p) {
     + '</div>';
 }
 
+// Troca o período ativo (o atual vai pra arquivado, nada se perde) e
+// re-renderiza a tela onde o usuário está.
+function ativarPeriodo(p) {
+  if (!p || p.status === 'ativo') return;
+  const atual = per();
+  atual.status = 'arquivado';
+  atual.arquivadoEm = Date.now();
+  p.status = 'ativo';
+  p.arquivadoEm = null;
+  state.periodoAtivoId = p.id;
+  simState = {};
+  currentDiscId = null;
+  saveState();
+  renderHeader();
+  renderConfig();
+  renderDisciplinas();
+  renderHome();
+  const tela = document.querySelector('.screen.active');
+  if (tela && tela.id === 's-simulador') renderSimulador();
+  if (tela && tela.id === 's-detalhe') goto('s-disciplinas');
+}
+
+// Seletor rápido de período (cabeçalho e simulador).
+function openModalPeriodos() {
+  const ordenados = state.periodos.slice().sort((a, b) => (b.criadoEm || 0) - (a.criadoEm || 0));
+  const itens = ordenados.map(p => {
+    const r = calcPeriodo({}, p);
+    const ativo = p.status === 'ativo';
+    return '<button type="button" class="per-pick' + (ativo ? ' on' : '') + '" data-per-pick="' + p.id + '">'
+      + '<span class="per-pick-nome">' + escapeHTML(p.nome) + '</span>'
+      + '<span class="per-pick-meta">' + r.n + ' disc · ' + fmtNum(r.totalScore, 0) + ' pts'
+      + (r.aprov !== null ? ' · ' + fmtNum(r.aprov, 0) + '%' : '') + '</span>'
+      + '<span class="per-pick-tag">' + (ativo ? 'atual' : 'abrir') + '</span>'
+      + '</button>';
+  }).join('');
+  openModalInfo('Períodos',
+    '<div class="per-picks">' + itens + '</div>'
+    + '<button type="button" class="btn secondary sm per-pick-novo" id="m-per-novo">+ novo período</button>'
+    + '<p class="form-hint">trocar de período arquiva o atual; nenhuma nota se perde.</p>');
+  const body = document.getElementById('modal-body');
+  body.querySelectorAll('[data-per-pick]').forEach(b => b.addEventListener('click', () => {
+    const p = state.periodos.find(x => x.id === b.dataset.perPick);
+    document.getElementById('modal').hidden = true;
+    ativarPeriodo(p);
+  }));
+  document.getElementById('m-per-novo').addEventListener('click', () => {
+    document.getElementById('modal').hidden = true;
+    fecharPeriodo();
+  });
+}
+
 function handlePeriodoAction(action, perId) {
   const p = state.periodos.find(x => x.id === perId);
   if (!p) return;
@@ -1908,20 +1989,7 @@ function handlePeriodoAction(action, perId) {
   }
   if (action === 'reabrir') {
     if (p.status === 'ativo') return;
-    const atual = per();
-    if (!confirm('Reabrir "' + p.nome + '"? O período atual ("' + atual.nome + '") será arquivado no lugar — nada se perde.')) return;
-    atual.status = 'arquivado';
-    atual.arquivadoEm = Date.now();
-    p.status = 'ativo';
-    p.arquivadoEm = null;
-    state.periodoAtivoId = p.id;
-    simState = {};
-    currentDiscId = null;
-    saveState();
-    renderHeader();
-    renderConfig();
-    renderDisciplinas();
-    renderHome();
+    ativarPeriodo(p);
     return;
   }
   if (action === 'apagar') {
@@ -2122,12 +2190,27 @@ function renderDetalhe() {
   }
 
   // Avaliações (dinâmicas: AP1/AP2, AT, o que a estrutura tiver)
-  document.getElementById('det-provas').innerHTML = d.provas.map(pv =>
-    '<div class="section">'
-    + '<div class="section-title">' + escapeHTML(pv.nome) + ' <span class="section-max">máx ' + fmtNum(pv.max, 1) + '</span></div>'
-    + '<div class="grade-row">' + gradeDisplay(pv, pv.max) + gradeActions(pv.id) + '</div>'
-    + '</div>'
-  ).join('');
+  document.getElementById('det-provas').innerHTML = d.provas.map(pv => {
+    let compHTML = '';
+    if (temComp(pv)) {
+      const partes = pv.comp.map(c => '<span class="comp-part' + (c.extra ? ' extra' : '') + '">'
+        + escapeHTML(c.nome) + ' <b>' + (hasVal(c.value) ? fmtNum(c.value, 1) : '—') + '</b>'
+        + '<span class="comp-max">/' + fmtNum(c.max, 1) + '</span></span>').join('');
+      const bruto = pv.comp.reduce((t, c) => t + (hasVal(c.value) ? c.value : 0), 0);
+      const perdido = hasVal(pv.value) && bruto > pv.max + 1e-9
+        ? '<span class="comp-lost">' + fmtNum(bruto - pv.max, 1) + ' acima do teto</span>' : '';
+      compHTML = '<div class="comp-row">' + partes + perdido + '</div>';
+    }
+    return '<div class="section">'
+      + '<div class="section-title">' + escapeHTML(pv.nome) + ' <span class="section-max">máx ' + fmtNum(pv.max, 1) + '</span>'
+      + '<button type="button" class="comp-edit" data-comp-edit="' + pv.id + '">' + (temComp(pv) ? 'composição' : '+ composição') + '</button></div>'
+      + '<div class="grade-row">' + gradeDisplay(pv, pv.max) + gradeActions(pv.id) + '</div>'
+      + compHTML
+      + '</div>';
+  }).join('');
+  document.querySelectorAll('#det-provas [data-comp-edit]').forEach(b => {
+    b.addEventListener('click', () => openModalComposicao(b.dataset.compEdit));
+  });
 
   // ACs — some se a estrutura não tem pool nem AC nenhuma
   const pool = d.acPool || 0;
@@ -2278,6 +2361,7 @@ function acRestante(d) {
 }
 
 function renderSimulador() {
+  renderHeader();
   const body = document.getElementById('sim-body');
   if (per().disciplinas.length === 0) {
     body.innerHTML = '<p class="hint">crie disciplinas primeiro.</p>';
@@ -2286,14 +2370,6 @@ function renderSimulador() {
   }
 
   body.innerHTML = per().disciplinas.map(d => renderSimDisc(d)).join('');
-
-  const refreshDiscScore = (discId) => {
-    const d = per().disciplinas.find(x => x.id === discId);
-    if (!d) return;
-    const r = calcDisc(d, simState.disc[discId] || {});
-    const scoreEl = document.querySelector('.sim-disc[data-disc="' + discId + '"] .sim-disc-score');
-    if (scoreEl) scoreEl.textContent = fmtNum(r.earned, 1) + '/' + fmtNum(r.total, 0);
-  };
 
   body.querySelectorAll('input[type="number"][data-disc]').forEach(inp => {
     if (inp.readOnly) return;
@@ -2310,8 +2386,19 @@ function renderSimulador() {
       const v = val === undefined || isNaN(val) ? undefined : val;
       if (key.startsWith('ac_')) simD.acs[key.slice(3)] = v;
       else if (key.startsWith('pv_')) simD.provas[key.slice(3)] = v;
+      else if (key.startsWith('pc_')) {
+        const [pvId, cId] = key.slice(3).split('|');
+        const d = per().disciplinas.find(x => x.id === discId);
+        const pv = d && d.provas.find(x => x.id === pvId);
+        if (!simD.comp) simD.comp = {};
+        if (!simD.comp[pvId]) simD.comp[pvId] = {};
+        simD.comp[pvId][cId] = v;
+        const n = pv ? compNota(pv, simD.comp[pvId]) : null;
+        simD.provas[pvId] = n === null ? undefined : n;
+      }
       else if (key === 'acExtra') simD.acExtra = v;
-      refreshDiscScore(discId);
+      inp.classList.toggle('filled', v !== undefined);
+      refreshSimDisc(discId);
       updateSimResult();
     });
   });
@@ -2326,7 +2413,7 @@ function renderSimulador() {
       simD.acs[acId] = next;
       btn.className = 'sim-toggle' + (next === true ? ' on' : next === false ? ' off' : '');
       btn.textContent = next === true ? 'entregue' : next === false ? 'não entregue' : '—';
-      refreshDiscScore(btn.dataset.disc);
+      refreshSimDisc(btn.dataset.disc);
       updateSimResult();
     });
   });
@@ -2334,30 +2421,87 @@ function renderSimulador() {
   updateSimResult();
 }
 
+function refreshSimDisc(discId) {
+  const d = per().disciplinas.find(x => x.id === discId);
+  const el = document.querySelector('.sim-disc[data-disc="' + discId + '"] .sim-disc-top');
+  if (d && el) el.outerHTML = simDiscTop(d);
+}
+
+// Cabeçalho do card: nome, nota real → simulada, status e barra com as
+// marcas de 70 (aprovação) e 90 (ritmo Stars).
+function simDiscTop(d) {
+  const simD = (simState.disc && simState.disc[d.id]) || {};
+  const real = calcDisc(d, {});
+  const r = calcDisc(d, simD);
+  const T = r.total || DISC_TOTAL;
+  const completa = r.dist >= T - 0.01;
+  const falta = Math.max(0, T - r.dist);
+  let st, chip;
+  if (completa && r.earned < APROV_FRAC * T - 1e-9) { st = 'as'; chip = 'AS'; }
+  else if (r.earned >= STARS_FRAC * T - 1e-9) { st = 'stars'; chip = '≥ 90'; }
+  else if (completa) { st = 'ok'; chip = 'aprovado'; }
+  else { st = 'open'; chip = fmtNum(falta, 1) + ' em aberto'; }
+
+  const precisa = alvo => {
+    const need = alvo * T - r.earned;
+    if (need <= 1e-9) return null;
+    return falta > 0 ? need / falta : Infinity;
+  };
+  let meta = '';
+  if (!completa) {
+    const p70 = precisa(APROV_FRAC), p90 = precisa(STARS_FRAC);
+    const fmt = x => x === null ? 'ok' : x > 1 ? 'impossível' : fmtNum(x * 100, 0) + '%';
+    meta = '<div class="sim-disc-meta">no que falta: <b>' + fmt(p70) + '</b> pra 70 · <b>' + fmt(p90) + '</b> pra 90</div>';
+  }
+  const delta = r.earned - real.earned;
+  return '<div class="sim-disc-top">'
+    + '<div class="sim-disc-head">'
+    + '<div class="sim-disc-nome">' + escapeHTML(d.nome) + '</div>'
+    + '<div class="sim-disc-score">'
+    + (delta > 0.05 ? '<span class="sim-disc-from">' + fmtNum(real.earned, 1) + ' →</span>' : '')
+    + fmtNum(r.earned, 1) + '<span class="sim-disc-tot">/' + fmtNum(T, 0) + '</span></div>'
+    + '</div>'
+    + '<div class="sim-mini">'
+    + '<div class="sim-mini-real" style="width:' + larg(real.earned, T) + '%"></div>'
+    + '<div class="sim-mini-sim st-' + st + '" style="left:' + larg(real.earned, T) + '%;width:' + larg(Math.max(0, delta), T) + '%"></div>'
+    + '<i class="sim-mini-mark" style="left:70%"></i><i class="sim-mini-mark stars" style="left:90%"></i>'
+    + '</div>'
+    + '<div class="sim-disc-sub"><span class="sim-chip st-' + st + '">' + chip + '</span>' + meta + '</div>'
+    + '</div>';
+}
+
 function renderSimDisc(d) {
   const simD = (simState.disc && simState.disc[d.id]) || {};
-  const r = calcDisc(d, simD);
   const mode = d.acMode || 'custom';
 
-  const field = (key, label, max, realSlot, simVal) => {
+  const field = (key, label, max, realSlot, simVal, cls) => {
     const realVal = realSlot && hasVal(realSlot.value) ? realSlot.value : null;
     const displayVal = realVal !== null ? fmtNum(realVal, 1) : (hasVal(simVal) ? simVal : '');
     const readonly = realVal !== null ? 'readonly' : '';
     const placeholder = realVal !== null ? fmtNum(realVal, 1) : '—';
-    return '<div class="sim-field">'
-      + '<label>' + label + '</label>'
-      + '<input type="number" step="0.1" min="0" max="' + max + '"'
+    const tag = realVal !== null ? '<span class="sim-tag' + (realSlot.expectativa ? ' prev' : '') + '">' + (realSlot.expectativa ? 'prev' : 'lançada') + '</span>' : '';
+    return '<div class="sim-field' + (cls ? ' ' + cls : '') + '">'
+      + '<label>' + label + tag + '</label>'
+      + '<input type="number" inputmode="decimal" step="0.1" min="0" max="' + max + '"'
       + ' data-disc="' + d.id + '" data-key="' + key + '"'
       + ' value="' + displayVal + '"'
       + ' placeholder="' + placeholder + '"'
+      + (realVal === null && hasVal(simVal) ? ' class="filled"' : '')
       + ' ' + readonly + '>'
       + '<span class="sim-max">/ ' + fmtNum(max, 1) + '</span>'
       + '</div>';
   };
 
-  const provaFields = d.provas.map(pv =>
-    field('pv_' + pv.id, escapeHTML(pv.nome), pv.max, pv, simD.provas && simD.provas[pv.id])
-  ).join('');
+  const provaFields = d.provas.map(pv => {
+    if (temComp(pv) && !hasVal(pv.value)) {
+      const vals = (simD.comp && simD.comp[pv.id]) || {};
+      return '<div class="sim-comp">'
+        + '<div class="sim-comp-head">' + escapeHTML(pv.nome) + ' <span>máx ' + fmtNum(pv.max, 1) + ', extras com teto</span></div>'
+        + pv.comp.map(c => field('pc_' + pv.id + '|' + c.id, (c.extra ? '+ ' : '') + escapeHTML(c.nome), c.max, null, vals[c.id], c.extra ? 'extra' : '')).join('')
+        + '</div>';
+    }
+    return field('pv_' + pv.id, escapeHTML(pv.nome), pv.max, pv, simD.provas && simD.provas[pv.id]);
+  }).join('');
 
   let acFields = '';
   if (mode === 'equal') {
@@ -2388,40 +2532,51 @@ function renderSimDisc(d) {
   let restanteSection = '';
   if (restante > 0.01) {
     restanteSection = '<div class="sim-field sim-field-extra">'
-      + '<label>AC restante</label>'
-      + '<input type="number" step="0.5" min="0" max="' + restante.toFixed(2) + '"'
+      + '<label>AC restante<small>pontos de AC ainda por criar</small></label>'
+      + '<input type="number" inputmode="decimal" step="0.5" min="0" max="' + restante.toFixed(2) + '"'
       + ' data-disc="' + d.id + '" data-key="acExtra"'
-      + ' value="' + (hasVal(simD.acExtra) ? simD.acExtra : '') + '" placeholder="0">'
+      + ' value="' + (hasVal(simD.acExtra) ? simD.acExtra : '') + '" placeholder="—"'
+      + (hasVal(simD.acExtra) ? ' class="filled"' : '') + '>'
       + '<span class="sim-max">/ ' + fmtNum(restante, 1) + '</span>'
-      + '</div>'
-      + '<p class="sim-extra-hint">pontos de AC ainda por criar ou lançar</p>';
+      + '</div>';
   }
 
+  const r = calcDisc(d, simD);
   const bonusTxt = r.bonus > 0 ? '<p class="sim-extra-hint">inclui ' + fmtNum(r.bonus, 1) + ' de bônus (TP/extras)</p>' : '';
 
   return '<div class="sim-disc" data-disc="' + d.id + '">'
-    + '<div class="sim-disc-head">'
-    + '<div class="sim-disc-nome">' + escapeHTML(d.nome) + '</div>'
-    + '<div class="sim-disc-score">' + fmtNum(r.earned, 1) + '/' + fmtNum(r.total, 0) + '</div>'
-    + '</div>'
+    + simDiscTop(d)
+    + '<div class="sim-fields">'
     + provaFields
     + acFields
     + restanteSection
+    + '</div>'
     + bonusTxt
     + '</div>';
 }
 
 function updateSimResult() {
+  const real = calcPeriodo({});
   const p = calcPeriodo(simState);
+  const T = p.total || EMPTY_TOTAL_DEN;
   document.getElementById('sim-total').textContent = fmtNum(p.totalScore, 0);
-  document.getElementById('sim-max').textContent = p.total || EMPTY_TOTAL_DEN;
-  const pct = p.total > 0 ? Math.max(0, Math.min(100, (p.totalScore / p.total) * 100)) : 0;
+  document.getElementById('sim-max').textContent = T;
+  const delta = p.totalScore - real.totalScore;
+  document.getElementById('sim-delta').innerHTML = delta > 0.05
+    ? '<span>+' + fmtNum(delta, 1) + '</span> simulados' : 'sem simulação';
+  document.getElementById('sim-bar-real').style.width = larg(real.totalScore, T) + '%';
   const bar = document.getElementById('sim-bar');
-  bar.style.width = pct + '%';
+  bar.style.left = larg(real.totalScore, T) + '%';
+  bar.style.width = larg(Math.max(0, delta), T) + '%';
+  const mark = document.getElementById('sim-mark-stars');
+  mark.style.left = (p.total > 0 ? (p.starsNeeded / p.total) * 100 : STARS_FRAC * 100) + '%';
+  mark.querySelector('span').textContent = 'Stars ' + fmtNum(p.total > 0 ? p.starsNeeded : EMPTY_STARS_DEN, 0);
   const hint = document.getElementById('sim-hint');
+  const needEl = document.getElementById('sim-need');
+  needEl.innerHTML = '';
 
   if (p.n === 0) {
-    bar.className = 'bar-fill';
+    bar.className = 'sim-track-sim';
     hint.textContent = 'sem disciplinas';
     return;
   }
@@ -2431,19 +2586,62 @@ function updateSimResult() {
     return r.dist >= r.total - 0.01 && r.earned < APROV_FRAC * r.total - 1e-9;
   }).map(d => d.nome);
 
+  let st;
   if (!p.starsEligible) {
-    bar.className = 'bar-fill danger';
-    hint.innerHTML = p.anyAS ? 'AS feita — inelegível pro Stars' : 'menos de ' + STARS_MIN_DISC + ' disciplinas — inelegível pro Stars';
+    st = 'danger';
+    hint.innerHTML = p.anyAS ? 'AS feita: inelegível pro Stars' : 'menos de ' + STARS_MIN_DISC + ' disciplinas: inelegível pro Stars';
   } else if (abaixo.length) {
-    bar.className = 'bar-fill danger';
-    hint.innerHTML = '<strong>' + escapeHTML(abaixo.join(', ')) + '</strong> fecha abaixo de 70 nesse cenário — AS elimina do Stars';
+    st = 'danger';
+    hint.innerHTML = '<strong>' + escapeHTML(abaixo.join(', ')) + '</strong> fecha abaixo de 70 nesse cenário. AS elimina do Stars';
   } else if (p.totalScore >= p.starsNeeded) {
-    bar.className = 'bar-fill success';
+    st = 'success';
     hint.innerHTML = 'Stars garantido com <strong>' + fmtNum(p.totalScore, 0) + '</strong> pts';
   } else {
-    bar.className = 'bar-fill accent';
+    st = 'accent';
     hint.innerHTML = 'faltam <strong>' + fmtNum(p.starsNeeded - p.totalScore, 1) + '</strong> pts pro Stars';
   }
+  bar.className = 'sim-track-sim ' + st;
+  document.getElementById('sim-summary').dataset.st = st;
+
+  const vazio = Math.max(0, p.total - p.distReg);
+  const need = p.starsNeeded - p.totalScore;
+  if (p.starsEligible && need > 0.01) {
+    if (vazio <= 0.01) needEl.innerHTML = 'cenário completo e abaixo da linha';
+    else {
+      const frac = need / vazio;
+      needEl.innerHTML = 'nos <strong>' + fmtNum(vazio, 1) + '</strong> pts ainda vazios, precisa render <strong class="'
+        + (frac > 1 ? 'bad' : frac > 0.9 ? 'warn' : 'good') + '">'
+        + (frac > 1 ? 'mais de 100%' : fmtNum(frac * 100, 0) + '%') + '</strong>';
+    }
+  }
+}
+
+// Preenche todo slot vazio com a fração dada do máximo (0 a 1).
+function fillSim(frac) {
+  const r1 = v => Math.round(v * 10) / 10;
+  simState = { disc: {} };
+  per().disciplinas.forEach(d => {
+    const o = ensureSim(d.id);
+    d.provas.forEach(pv => {
+      if (hasVal(pv.value)) return;
+      if (temComp(pv)) {
+        o.comp = o.comp || {};
+        o.comp[pv.id] = {};
+        pv.comp.forEach(c => { o.comp[pv.id][c.id] = c.extra ? 0 : r1(frac * c.max); });
+        o.provas[pv.id] = compNota(pv, o.comp[pv.id]);
+      } else o.provas[pv.id] = r1(frac * pv.max);
+    });
+    if ((d.acMode || 'custom') === 'equal') {
+      d.acs.forEach(ac => {
+        if (ac.delivered !== true && ac.delivered !== false) o.acs[ac.id] = frac >= 0.5;
+      });
+    } else {
+      d.acs.forEach(ac => { if (!hasVal(ac.value)) o.acs[ac.id] = r1(frac * ac.valor); });
+    }
+    const restante = acRestante(d);
+    if (restante > 0.01) o.acExtra = r1(frac * restante);
+  });
+  renderSimulador();
 }
 
 // ───────── MODAIS ─────────
@@ -2716,6 +2914,54 @@ function openModalGrade(tipo, isExpectativa) {
     ? '<button type="button" class="btn sm danger" id="m-clear">limpar nota</button>'
     : '';
 
+  if (pv && temComp(pv)) {
+    openModal(
+      kindLabel + ' · ' + label + ' · ' + d.nome,
+      pv.comp.map(c => '<label>' + escapeHTML(c.nome) + (c.extra ? ' <span class="comp-tag">extra</span>' : '') + ' (0 a ' + fmtNum(c.max, 1) + ')'
+        + '<input type="number" class="m-comp" data-comp="' + c.id + '" step="0.1" min="0" max="' + c.max + '" value="' + (hasVal(c.value) ? c.value : '') + '">'
+        + '</label>').join('')
+      + '<p class="form-hint" id="m-comp-tot"></p>'
+      + clearBtn,
+      () => {
+        const vals = {};
+        for (const c of pv.comp) {
+          const raw = document.querySelector('.m-comp[data-comp="' + c.id + '"]').value;
+          if (raw === '') { vals[c.id] = null; continue; }
+          const v = parseFloat(raw);
+          if (isNaN(v) || v < 0 || v > c.max) { alert(c.nome + ': entre 0 e ' + fmtNum(c.max, 1)); return false; }
+          vals[c.id] = v;
+        }
+        const nota = compNota(pv, vals);
+        if (nota === null) { alert('Preencha pelo menos uma parte.'); return false; }
+        pv.comp.forEach(c => { c.value = vals[c.id]; });
+        pv.value = nota;
+        pv.expectativa = isExpectativa;
+        pushRecente({ discId: d.id, discNome: d.nome, tipo, label, valor: nota, max, kind: isExpectativa ? 'expectativa' : 'oficial' });
+        saveDisc(d);
+        renderDetalhe();
+        return true;
+      }
+    );
+    const totEl = document.getElementById('m-comp-tot');
+    const upd = () => {
+      const vals = {};
+      document.querySelectorAll('.m-comp').forEach(i => { vals[i.dataset.comp] = i.value === '' ? null : parseFloat(i.value); });
+      const bruto = pv.comp.reduce((t, c) => t + (hasVal(vals[c.id]) ? vals[c.id] : 0), 0);
+      const n = compNota(pv, vals);
+      totEl.textContent = n === null ? 'nota da ' + label + ': —'
+        : 'nota da ' + label + ': ' + fmtNum(n, 1) + ' / ' + fmtNum(max, 1) + (bruto > max + 1e-9 ? ' (' + fmtNum(bruto - max, 1) + ' acima do teto)' : '');
+    };
+    document.querySelectorAll('.m-comp').forEach(i => i.addEventListener('input', upd));
+    upd();
+    wireModalClear(() => {
+      pv.value = null;
+      pv.expectativa = false;
+      pv.comp.forEach(c => { c.value = null; });
+      saveDisc(d);
+    });
+    return;
+  }
+
   openModal(
     kindLabel + ' · ' + label + ' · ' + d.nome,
     '<label>nota (0 a ' + fmtNum(max, 1) + ')'
@@ -2753,6 +2999,91 @@ function openModalGrade(tipo, isExpectativa) {
     if (isAS) slot.taken = false;
     saveDisc(d);
   });
+}
+
+// Composição da avaliação: partes principais somam o máximo dela; partes
+// "extra" (ex.: 4 pontos extras na AP2) completam o que faltou, com teto.
+function openModalComposicao(pvId) {
+  const d = discAtual();
+  if (!d) return;
+  const pv = d.provas.find(x => x.id === pvId);
+  if (!pv) return;
+  let linhas = temComp(pv)
+    ? pv.comp.map(c => ({ id: c.id, nome: c.nome, max: c.max, extra: c.extra }))
+    : [{ id: null, nome: 'prova escrita', max: pv.max, extra: false }, { id: null, nome: 'pontos extras', max: 4, extra: true }];
+
+  const linhaHTML = (l, i) => '<div class="comp-linha" data-i="' + i + '">'
+    + '<input type="text" class="cl-nome" value="' + escapeHTML(l.nome) + '" placeholder="nome">'
+    + '<input type="number" class="cl-max" step="0.5" min="0" value="' + l.max + '">'
+    + '<label class="cl-extra"><input type="checkbox"' + (l.extra ? ' checked' : '') + '>extra</label>'
+    + '<button type="button" class="cl-del" aria-label="remover">×</button>'
+    + '</div>';
+  const ler = () => {
+    linhas = Array.from(document.querySelectorAll('.comp-linha')).map((el, i) => ({
+      id: linhas[i] ? linhas[i].id : null,
+      nome: el.querySelector('.cl-nome').value.trim(),
+      max: parseFloat(el.querySelector('.cl-max').value),
+      extra: el.querySelector('.cl-extra input').checked
+    }));
+  };
+  const desenhar = () => {
+    document.getElementById('m-comp-list').innerHTML = linhas.map(linhaHTML).join('');
+    const princ = linhas.filter(l => !l.extra).reduce((t, l) => t + (l.max || 0), 0);
+    const ext = linhas.filter(l => l.extra).reduce((t, l) => t + (l.max || 0), 0);
+    document.getElementById('m-comp-sum').textContent = 'principal ' + fmtNum(princ, 1) + ' de ' + fmtNum(pv.max, 1)
+      + (ext > 0 ? ' · extras até ' + fmtNum(ext, 1) : '');
+  };
+
+  openModal('Composição · ' + pv.nome + ' · ' + d.nome,
+    '<div id="m-comp-wrap"><p class="form-hint">as partes principais somam ' + fmtNum(pv.max, 1) + '. partes marcadas como extra cobrem o que faltou, e a ' + escapeHTML(pv.nome) + ' nunca passa de ' + fmtNum(pv.max, 1) + '.</p>'
+    + '<div class="comp-list" id="m-comp-list"></div>'
+    + '<p class="form-hint" id="m-comp-sum"></p>'
+    + '<button type="button" class="btn secondary sm" id="m-comp-add">+ parte</button>'
+    + (temComp(pv) ? ' <button type="button" class="btn sm danger" id="m-comp-off">remover composição</button>' : '') + '</div>',
+    () => {
+      ler();
+      if (!linhas.length) { alert('Adicione pelo menos uma parte.'); return false; }
+      if (linhas.some(l => !l.nome)) { alert('Toda parte precisa de nome.'); return false; }
+      if (linhas.some(l => isNaN(l.max) || l.max <= 0)) { alert('Toda parte precisa valer mais que 0.'); return false; }
+      const princ = linhas.filter(l => !l.extra).reduce((t, l) => t + l.max, 0);
+      if (Math.abs(princ - pv.max) > 0.01) {
+        alert('As partes principais somam ' + fmtNum(princ, 1) + '. Precisa fechar em ' + fmtNum(pv.max, 1) + '.');
+        return false;
+      }
+      const antigas = temComp(pv) ? pv.comp : [];
+      pv.comp = linhas.map(l => {
+        const old = l.id && antigas.find(c => c.id === l.id);
+        const val = old && hasVal(old.value) ? Math.min(old.value, l.max) : null;
+        return { id: l.id || 'pc-' + uid(), nome: l.nome, max: l.max, extra: l.extra, value: val };
+      });
+      // Nota lançada antes da composição: vira a parte principal.
+      if (hasVal(pv.value) && compNota(pv) === null) {
+        const p0 = pv.comp.find(c => !c.extra);
+        if (p0) p0.value = Math.min(p0.max, pv.value);
+      }
+      if (hasVal(pv.value)) pv.value = compNota(pv);
+      if (simState.disc) delete simState.disc[d.id];
+      saveDisc(d);
+      renderDetalhe();
+      return true;
+    });
+  desenhar();
+  const body = document.getElementById('m-comp-wrap');
+  body.addEventListener('click', e => {
+    if (e.target.closest('#m-comp-add')) {
+      ler(); linhas.push({ id: null, nome: 'pontos extras', max: 2, extra: true }); desenhar();
+    } else if (e.target.closest('.cl-del')) {
+      ler(); linhas.splice(Number(e.target.closest('.comp-linha').dataset.i), 1); desenhar();
+    } else if (e.target.closest('#m-comp-off')) {
+      if (!confirm('Remover a composição? A nota da ' + pv.nome + ' fica como está.')) return;
+      delete pv.comp;
+      if (simState.disc) delete simState.disc[d.id];
+      saveDisc(d);
+      document.getElementById('modal').hidden = true;
+      renderDetalhe();
+    }
+  });
+  body.addEventListener('change', e => { if (e.target.closest('.comp-linha')) { ler(); desenhar(); } });
 }
 
 function setAcMode(mode) {
@@ -3111,23 +3442,12 @@ document.getElementById('btn-reset-sim').addEventListener('click', () => {
   renderSimulador();
 });
 
-document.getElementById('btn-fill-max-sim').addEventListener('click', () => {
-  simState = { disc: {} };
-  per().disciplinas.forEach(d => {
-    const o = ensureSim(d.id);
-    d.provas.forEach(pv => { if (!hasVal(pv.value)) o.provas[pv.id] = pv.max; });
-    if ((d.acMode || 'custom') === 'equal') {
-      d.acs.forEach(ac => {
-        if (ac.delivered !== true && ac.delivered !== false) o.acs[ac.id] = true;
-      });
-    } else {
-      d.acs.forEach(ac => { if (!hasVal(ac.value)) o.acs[ac.id] = ac.valor; });
-    }
-    const restante = acRestante(d);
-    if (restante > 0.01) o.acExtra = restante;
-  });
-  renderSimulador();
+document.getElementById('btn-fill-max-sim').addEventListener('click', () => fillSim(1));
+const simRange = document.getElementById('sim-fill-range');
+simRange.addEventListener('input', () => {
+  document.getElementById('sim-fill-val').textContent = simRange.value + '%';
 });
+document.getElementById('btn-fill-pct-sim').addEventListener('click', () => fillSim(Number(simRange.value) / 100));
 
 // Header: saudação + período ativo + data
 function renderHeader() {
@@ -3136,9 +3456,16 @@ function renderHeader() {
   const metaEl = document.getElementById('hdr-meta');
   if (metaEl) {
     const dataStr = new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' });
-    metaEl.textContent = per().nome + ' · ' + dataStr;
+    metaEl.innerHTML = '<button type="button" class="hdr-per" data-per-switch aria-label="trocar período">'
+      + escapeHTML(per().nome) + '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5l3 3 3-3"/></svg></button>'
+      + '<span>' + dataStr + '</span>';
   }
+  const chip = document.getElementById('sim-per-chip');
+  if (chip) chip.innerHTML = escapeHTML(per().nome) + '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5l3 3 3-3"/></svg>';
 }
+document.addEventListener('click', e => {
+  if (e.target.closest('[data-per-switch]')) openModalPeriodos();
+});
 renderHeader();
 
 // ───────── CONFIG BINDINGS ─────────

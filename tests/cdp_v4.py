@@ -201,7 +201,7 @@ try:
     check("simulador mostra campo da AT", h.ev("!!document.querySelector('[data-key=\"pv_at\"]')"))
     h.ev("document.getElementById('btn-fill-max-sim').click()")
     sc = txt(h, ".sim-disc[data-disc='cx'] .sim-disc-score")
-    check("preencher máximos fecha a AT em 100", sc == "100/100", sc)
+    check("preencher máximos fecha a AT em 100", sc.endswith("100/100"), sc)
 
     # 12. modal do TP sugere alvo e mostra a nota de cada disciplina
     h.ev("goto('s-home'); openModalTP()")
