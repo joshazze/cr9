@@ -2925,3 +2925,39 @@ header::before {
 .cl-extra { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-dim); margin: 0; }
 .cl-extra input { margin: 0; width: auto; }
 .cl-del { background: none; border: none; color: var(--text-muted); font-size: 20px; cursor: pointer; }
+
+/* ── Composição: prova e extras em blocos separados ── */
+.comp-bloco {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 12px 12px;
+  margin-bottom: 12px;
+  background: var(--card);
+}
+.comp-bloco.extra {
+  border-color: color-mix(in srgb, var(--success) 35%, var(--border));
+  background: color-mix(in srgb, var(--success-soft) 55%, var(--card));
+}
+.comp-bloco-head { display: flex; justify-content: space-between; align-items: baseline; font-family: var(--serif); font-size: 16px; font-weight: 500; color: var(--text); margin-bottom: 2px; }
+.comp-bloco.extra .comp-bloco-head span { color: var(--success); }
+.comp-bloco-head b { font-family: var(--sans); font-size: 12px; font-weight: 600; color: var(--text-dim); }
+.comp-bloco-head b.bad { color: var(--danger); }
+.comp-bloco .form-hint { margin: 2px 0 6px; }
+.comp-bloco .comp-list { margin: 6px 0 10px; }
+.comp-vazio { font-size: 12px; color: var(--text-muted); font-style: italic; }
+.comp-linha { grid-template-columns: 1fr 64px 28px; }
+.comp-sep { flex-direction: column; align-items: flex-start; gap: 6px; }
+.comp-grupo { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.comp-grupo-lbl { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); min-width: 64px; }
+.comp-grupo-lbl b { color: var(--text); }
+.comp-grupo.extra .comp-grupo-lbl, .comp-grupo.extra .comp-grupo-lbl b { color: var(--success); }
+.sim-comp-sub {
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px dashed color-mix(in srgb, var(--success) 35%, var(--border));
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--success);
+}

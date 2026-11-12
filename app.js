@@ -4,7 +4,7 @@ const KEY = 'cr9-v1';
 const MAX_RECENTES = 12;
 const MAX_LANCAMENTOS = 500;
 // Bumpar junto com CACHE_NAME do sw.js a cada deploy.
-const APP_VERSION = 'v22';
+const APP_VERSION = 'v23';
 
 // Regras Ibmec/Stars: disciplina vale 100 pts. Estrutura padrão AP1(40) +
 // AP2(40) + pool de AC(20), mas cada disciplina pode ter a sua (ex.: AT 60 +
@@ -2236,9 +2236,15 @@ function renderDetalhe() {
       if (hasVal(pv.value)) shown = Object.assign({}, pv, { value: r.provasF[i] });
     }
     if (temComp(pv)) {
-      const partes = pv.comp.map(c => '<span class="comp-part' + (c.extra ? ' extra' : '') + '">'
-        + escapeHTML(c.nome) + ' <b>' + (hasVal(c.value) ? fmtNum(c.value, 1) : '—') + '</b>'
-        + '<span class="comp-max">/' + fmtNum(c.max, 1) + '</span></span>').join('');
+      const chip = c => '<span class="comp-part' + (c.extra ? ' extra' : '') + '">'
+        + (c.extra ? '+ ' : '') + escapeHTML(c.nome) + ' <b>' + (hasVal(c.value) ? fmtNum(c.value, 1) : '—') + '</b>'
+        + '<span class="comp-max">/' + fmtNum(c.max, 1) + '</span></span>';
+      const somaDe = ext => pv.comp.filter(c => c.extra === ext).reduce((t, c) => t + (hasVal(c.value) ? c.value : 0), 0);
+      const exts = pv.comp.filter(c => c.extra);
+      const partes = '<div class="comp-grupo"><span class="comp-grupo-lbl">prova <b>' + fmtNum(Math.min(pv.max, somaDe(false)), 1) + '</b></span>'
+        + pv.comp.filter(c => !c.extra).map(chip).join('') + '</div>'
+        + (exts.length ? '<div class="comp-grupo extra"><span class="comp-grupo-lbl">extras <b>+' + fmtNum(somaDe(true), 1) + '</b></span>'
+          + exts.map(chip).join('') + '</div>' : '');
       const bruto = compBruto(pv);
       let nota = '';
       if (hasVal(pv.value) && bruto > pv.max + 1e-9) {
@@ -2250,7 +2256,7 @@ function renderDetalhe() {
         nota = (amtFoi > 1e-9 ? '<span class="comp-lost">+' + fmtNum(amtFoi, 1) + ' aplicado na ' + foi.map(x => escapeHTML(d.provas[x.to].nome)).join(', ') + '</span>' : '')
           + (pend > 1e-9 ? '<span class="comp-lost">+' + fmtNum(pend, 1) + (r.spillPend > 1e-9 ? ' vai pra ' + outros + ' quando tiver nota/espaço' : '') + '</span>' : '');
       }
-      compHTML += '<div class="comp-row">' + partes + nota + '</div>';
+      compHTML += '<div class="comp-row comp-sep">' + partes + (nota ? '<div class="comp-grupo">' + nota + '</div>' : '') + '</div>';
     }
     return '<div class="section">'
       + '<div class="section-title">' + escapeHTML(pv.nome) + ' <span class="section-max">máx ' + fmtNum(pv.max, 1) + '</span>'
@@ -2548,7 +2554,11 @@ function renderSimDisc(d) {
       const vals = (simD.comp && simD.comp[pv.id]) || {};
       return '<div class="sim-comp">'
         + '<div class="sim-comp-head">' + escapeHTML(pv.nome) + ' <span>máx ' + fmtNum(pv.max, 1) + ', o que passar vai pras outras avaliações</span></div>'
-        + pv.comp.map(c => field('pc_' + pv.id + '|' + c.id, (c.extra ? '+ ' : '') + escapeHTML(c.nome), c.max, null, vals[c.id], c.extra ? 'extra' : '')).join('')
+        + pv.comp.filter(c => !c.extra).map(c => field('pc_' + pv.id + '|' + c.id, escapeHTML(c.nome), c.max, null, vals[c.id])).join('')
+        + (pv.comp.some(c => c.extra)
+          ? '<div class="sim-comp-sub">pontos extras</div>'
+            + pv.comp.filter(c => c.extra).map(c => field('pc_' + pv.id + '|' + c.id, '+ ' + escapeHTML(c.nome), c.max, null, vals[c.id], 'extra')).join('')
+          : '')
         + '</div>';
     }
     return field('pv_' + pv.id, escapeHTML(pv.nome), pv.max, pv, simD.provas && simD.provas[pv.id]);
@@ -2968,9 +2978,16 @@ function openModalGrade(tipo, isExpectativa) {
   if (pv && temComp(pv)) {
     openModal(
       kindLabel + ' · ' + label + ' · ' + d.nome,
-      pv.comp.map(c => '<label>' + escapeHTML(c.nome) + (c.extra ? ' <span class="comp-tag">extra</span>' : '') + ' (0 a ' + fmtNum(c.max, 1) + ')'
-        + '<input type="number" class="m-comp" data-comp="' + c.id + '" step="0.1" min="0" max="' + c.max + '" value="' + (hasVal(c.value) ? c.value : '') + '">'
-        + '</label>').join('')
+      [false, true].map(ext => {
+        const partes = pv.comp.filter(c => c.extra === ext);
+        if (!partes.length) return '';
+        return '<div class="comp-bloco' + (ext ? ' extra' : '') + '">'
+          + '<div class="comp-bloco-head"><span>' + (ext ? 'Pontos extras' : 'Prova') + '</span></div>'
+          + partes.map(c => '<label>' + escapeHTML(c.nome) + ' (0 a ' + fmtNum(c.max, 1) + ')'
+            + '<input type="number" inputmode="decimal" class="m-comp" data-comp="' + c.id + '" step="0.1" min="0" max="' + c.max + '" value="' + (hasVal(c.value) ? c.value : '') + '">'
+            + '</label>').join('')
+          + '</div>';
+      }).join('')
       + '<p class="form-hint" id="m-comp-tot"></p>'
       + clearBtn,
       () => {
@@ -3063,42 +3080,61 @@ function openModalComposicao(pvId) {
     ? pv.comp.map(c => ({ id: c.id, nome: c.nome, max: c.max, extra: c.extra }))
     : [{ id: null, nome: 'prova escrita', max: pv.max, extra: false }, { id: null, nome: 'pontos extras', max: 4, extra: true }];
 
+  // Dois blocos separados: as partes da prova (fecham o máximo) e os pontos
+  // extras (só eles podem passar do máximo e transbordar pra AP1).
   const linhaHTML = (l, i) => '<div class="comp-linha" data-i="' + i + '">'
     + '<input type="text" class="cl-nome" value="' + escapeHTML(l.nome) + '" placeholder="nome">'
     + '<input type="number" class="cl-max" step="0.5" min="0" value="' + l.max + '">'
-    + '<label class="cl-extra"><input type="checkbox"' + (l.extra ? ' checked' : '') + '>extra</label>'
     + '<button type="button" class="cl-del" aria-label="remover">×</button>'
     + '</div>';
   const ler = () => {
-    linhas = Array.from(document.querySelectorAll('.comp-linha')).map((el, i) => ({
-      id: linhas[i] ? linhas[i].id : null,
-      nome: el.querySelector('.cl-nome').value.trim(),
-      max: parseFloat(el.querySelector('.cl-max').value),
-      extra: el.querySelector('.cl-extra input').checked
-    }));
+    linhas = Array.from(document.querySelectorAll('#m-comp-wrap .comp-linha')).map(el => {
+      const i = Number(el.dataset.i);
+      return {
+        id: linhas[i] ? linhas[i].id : null,
+        nome: el.querySelector('.cl-nome').value.trim(),
+        max: parseFloat(el.querySelector('.cl-max').value),
+        extra: !!el.closest('#m-comp-ext')
+      };
+    });
   };
   const desenhar = () => {
-    document.getElementById('m-comp-list').innerHTML = linhas.map(linhaHTML).join('');
+    const bloco = extra => linhas.map((l, i) => l.extra === extra ? linhaHTML(l, i) : '').join('')
+      || '<p class="comp-vazio">' + (extra ? 'sem pontos extras' : 'nenhuma parte') + '</p>';
+    document.getElementById('m-comp-prova').innerHTML = bloco(false);
+    document.getElementById('m-comp-ext').innerHTML = bloco(true);
     const princ = linhas.filter(l => !l.extra).reduce((t, l) => t + (l.max || 0), 0);
     const ext = linhas.filter(l => l.extra).reduce((t, l) => t + (l.max || 0), 0);
-    document.getElementById('m-comp-sum').textContent = 'principal ' + fmtNum(princ, 1) + ' de ' + fmtNum(pv.max, 1)
-      + (ext > 0 ? ' · extras até ' + fmtNum(ext, 1) : '');
+    const ok = Math.abs(princ - pv.max) <= 0.01;
+    const sp = document.getElementById('m-comp-sum-prova');
+    sp.textContent = fmtNum(princ, 1) + ' de ' + fmtNum(pv.max, 1);
+    sp.classList.toggle('bad', !ok);
+    document.getElementById('m-comp-sum-ext').textContent = ext > 0 ? 'até +' + fmtNum(ext, 1) : '—';
   };
 
   openModal('Composição · ' + pv.nome + ' · ' + d.nome,
-    '<div id="m-comp-wrap"><p class="form-hint">as partes principais somam ' + fmtNum(pv.max, 1) + '. partes marcadas como extra cobrem o que faltou; se a ' + escapeHTML(pv.nome) + ' passar de ' + fmtNum(pv.max, 1) + ' com os extras, o excesso vai automaticamente pras outras avaliações (AP1).</p>'
-    + '<div class="comp-list" id="m-comp-list"></div>'
-    + '<p class="form-hint" id="m-comp-sum"></p>'
-    + '<button type="button" class="btn secondary sm" id="m-comp-add">+ parte</button>'
-    + (temComp(pv) ? ' <button type="button" class="btn sm danger" id="m-comp-off">remover composição</button>' : '') + '</div>',
+    '<div id="m-comp-wrap">'
+    + '<div class="comp-bloco">'
+    + '<div class="comp-bloco-head"><span>Prova</span><b id="m-comp-sum-prova"></b></div>'
+    + '<p class="form-hint">as partes da prova fecham ' + fmtNum(pv.max, 1) + ' e nunca passam disso.</p>'
+    + '<div class="comp-list" id="m-comp-prova"></div>'
+    + '<button type="button" class="btn secondary sm" data-comp-add="prova">+ parte da prova</button>'
+    + '</div>'
+    + '<div class="comp-bloco extra">'
+    + '<div class="comp-bloco-head"><span>Pontos extras</span><b id="m-comp-sum-ext"></b></div>'
+    + '<p class="form-hint">completam a ' + escapeHTML(pv.nome) + '. o que passar de ' + fmtNum(pv.max, 1) + ' vai automaticamente pras outras avaliações (AP1).</p>'
+    + '<div class="comp-list" id="m-comp-ext"></div>'
+    + '<button type="button" class="btn secondary sm" data-comp-add="extra">+ ponto extra</button>'
+    + '</div>'
+    + (temComp(pv) ? '<button type="button" class="btn sm danger" id="m-comp-off">remover composição</button>' : '') + '</div>',
     () => {
       ler();
-      if (!linhas.length) { alert('Adicione pelo menos uma parte.'); return false; }
+      if (!linhas.some(l => !l.extra)) { alert('A prova precisa de pelo menos uma parte.'); return false; }
       if (linhas.some(l => !l.nome)) { alert('Toda parte precisa de nome.'); return false; }
       if (linhas.some(l => isNaN(l.max) || l.max <= 0)) { alert('Toda parte precisa valer mais que 0.'); return false; }
       const princ = linhas.filter(l => !l.extra).reduce((t, l) => t + l.max, 0);
       if (Math.abs(princ - pv.max) > 0.01) {
-        alert('As partes principais somam ' + fmtNum(princ, 1) + '. Precisa fechar em ' + fmtNum(pv.max, 1) + '.');
+        alert('As partes da prova somam ' + fmtNum(princ, 1) + '. Precisa fechar em ' + fmtNum(pv.max, 1) + '.');
         return false;
       }
       const antigas = temComp(pv) ? pv.comp : [];
@@ -3121,8 +3157,13 @@ function openModalComposicao(pvId) {
   desenhar();
   const body = document.getElementById('m-comp-wrap');
   body.addEventListener('click', e => {
-    if (e.target.closest('#m-comp-add')) {
-      ler(); linhas.push({ id: null, nome: 'pontos extras', max: 2, extra: true }); desenhar();
+    const add = e.target.closest('[data-comp-add]');
+    if (add) {
+      ler();
+      linhas.push(add.dataset.compAdd === 'extra'
+        ? { id: null, nome: 'ponto extra', max: 1, extra: true }
+        : { id: null, nome: 'parte ' + (linhas.filter(l => !l.extra).length + 1), max: 0, extra: false });
+      desenhar();
     } else if (e.target.closest('.cl-del')) {
       ler(); linhas.splice(Number(e.target.closest('.comp-linha').dataset.i), 1); desenhar();
     } else if (e.target.closest('#m-comp-off')) {
@@ -3135,6 +3176,15 @@ function openModalComposicao(pvId) {
     }
   });
   body.addEventListener('change', e => { if (e.target.closest('.comp-linha')) { ler(); desenhar(); } });
+  body.addEventListener('input', e => {
+    if (!e.target.closest('.cl-max')) return;
+    const princ = Array.from(document.querySelectorAll('#m-comp-prova .cl-max')).reduce((t, i) => t + (parseFloat(i.value) || 0), 0);
+    const ext = Array.from(document.querySelectorAll('#m-comp-ext .cl-max')).reduce((t, i) => t + (parseFloat(i.value) || 0), 0);
+    const sp = document.getElementById('m-comp-sum-prova');
+    sp.textContent = fmtNum(princ, 1) + ' de ' + fmtNum(pv.max, 1);
+    sp.classList.toggle('bad', Math.abs(princ - pv.max) > 0.01);
+    document.getElementById('m-comp-sum-ext').textContent = ext > 0 ? 'até +' + fmtNum(ext, 1) : '—';
+  });
 }
 
 function setAcMode(mode) {

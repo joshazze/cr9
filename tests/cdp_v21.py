@@ -41,6 +41,12 @@ try:
     h.ev(f"document.querySelector('[data-comp-edit=\"{pv2}\"]').click()")
     check("modal de composição abre com escrita 40 + extras 4",
           h.ev("Array.from(document.querySelectorAll('.cl-max')).map(i => +i.value).join(',')") == "40,4")
+    check("modal separa prova e extras",
+          h.ev("document.querySelectorAll('#m-comp-prova .comp-linha').length") == 1
+          and h.ev("document.querySelectorAll('#m-comp-ext .comp-linha').length") == 1)
+    h.ev("document.querySelector('[data-comp-add=\"extra\"]').click()")
+    check("+ ponto extra cai no bloco de extras", h.ev("document.querySelectorAll('#m-comp-ext .comp-linha').length") == 2)
+    h.ev("document.querySelectorAll('#m-comp-ext .cl-del')[1].click()")
     shot(h, "v21_modal_composicao")
     h.ev("document.getElementById('modal-save').click()")
     check("composição salva", h.ev(f"per().disciplinas.find(x => x.id === '{d_ap2}').provas[1].comp.length") == 2)
@@ -58,6 +64,7 @@ try:
     check("detalhe mostra AP2 41/40", "41" in h.ev("document.querySelectorAll('#det-provas .grade-display')[1].textContent"))
     check("detalhe avisa aplicado na AP1", "aplicado na AP1" in h.ev("document.getElementById('det-provas').textContent"))
     check("AP1 mostra o que recebeu", "dos extras da AP2" in h.ev("document.getElementById('det-provas').textContent"))
+    check("detalhe separa prova e extras", h.ev("document.querySelectorAll('#det-provas .comp-grupo.extra').length") == 1)
     shot(h, "v21_transborda_ap1")
     # AP1 cheia (40): sobra fica pendente, não some nem estoura
     h.ev(f"{D}.provas[0].value = 40; saveState(); renderDetalhe()")
