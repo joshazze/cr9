@@ -4,7 +4,7 @@ const KEY = 'cr9-v1';
 const MAX_RECENTES = 12;
 const MAX_LANCAMENTOS = 500;
 // Bumpar junto com CACHE_NAME do sw.js a cada deploy.
-const APP_VERSION = 'v21';
+const APP_VERSION = 'v22';
 
 // Regras Ibmec/Stars: disciplina vale 100 pts. Estrutura padrão AP1(40) +
 // AP2(40) + pool de AC(20), mas cada disciplina pode ter a sua (ex.: AT 60 +
@@ -502,8 +502,8 @@ function discTotal(d) {
 }
 
 // Composição de avaliação: a nota da avaliação é a soma das partes, com teto
-// no máximo dela. Partes "extra" (pontos extras dentro da AP) só cobrem o que
-// faltou na parte principal; o que passar do teto se perde.
+// no máximo dela (`pv.value`). Partes "extra" cobrem o que faltou e o que
+// passar do máximo transborda pras outras avaliações (ver calcDisc).
 function temComp(pv) { return Array.isArray(pv.comp) && pv.comp.length > 0; }
 function compNota(pv, vals) {
   let soma = 0, algum = false;
@@ -512,6 +512,9 @@ function compNota(pv, vals) {
     if (hasVal(v)) { soma += v; algum = true; }
   });
   return algum ? Math.min(pv.max, soma) : null;
+}
+function compBruto(pv) {
+  return pv.comp.reduce((t, c) => t + (hasVal(c.value) ? c.value : 0), 0);
 }
 function compResumo(pv) {
   return pv.comp.map(c => (c.extra ? '+' : '') + escapeHTML(c.nome) + ' ' + fmtNum(c.max, 1)).join(' · ');
@@ -562,6 +565,37 @@ function calcDisc(d, ov = {}, periodo = per()) {
       finais[iMin] = Math.max(finais[iMin], frac * d.provas[iMin].max);
     }
   }
+
+  // Extras da composição: a avaliação passa do máximo só por eles, e o que
+  // passar transborda pras outras avaliações já lançadas (AP2 → AP1), até
+  // completar cada uma. Sem destino com nota ainda, fica pendente.
+  const ovc = ov.comp || {};
+  const spill = [];
+  let spillPend = 0;
+  d.provas.forEach((pv, i) => {
+    if (!temComp(pv) || finais[i] === null) return;
+    const simComp = ovp[pv.id] !== undefined && ovc[pv.id];
+    if (!simComp && !hasVal(pv.value)) return;
+    const vals = simComp ? ovc[pv.id] : null;
+    let princ = 0, ext = 0;
+    pv.comp.forEach(c => {
+      const v = vals ? vals[c.id] : c.value;
+      if (!hasVal(v)) return;
+      if (c.extra) ext += v; else princ += v;
+    });
+    // Só extra transborda: a parte principal nunca passa do máximo.
+    let sobra = Math.min(ext, Math.min(princ, pv.max) + ext - pv.max);
+    if (sobra <= 1e-9) return;
+    d.provas.forEach((dst, j) => {
+      if (j === i || sobra <= 1e-9 || finais[j] === null) return;
+      const add = Math.min(sobra, dst.max - finais[j]);
+      if (add <= 1e-9) return;
+      finais[j] += add;
+      sobra -= add;
+      spill.push({ from: i, to: j, amt: add });
+    });
+    if (sobra > 1e-9) spillPend += sobra;
+  });
 
   let provaEarned = 0, provaDist = 0;
   finais.forEach((v, i) => {
@@ -621,7 +655,9 @@ function calcDisc(d, ov = {}, periodo = per()) {
     bonusRaw: tpB + exB,
     // hasAS = AS OFICIAL (taken). Previsão não elimina do Stars.
     hasAS: asM > 0 && asTaken === true && hasVal(asv),
-    provasF: finais
+    provasF: finais,
+    spill,
+    spillPend
   };
 }
 
@@ -2190,21 +2226,36 @@ function renderDetalhe() {
   }
 
   // Avaliações (dinâmicas: AP1/AP2, AT, o que a estrutura tiver)
-  document.getElementById('det-provas').innerHTML = d.provas.map(pv => {
+  document.getElementById('det-provas').innerHTML = d.provas.map((pv, i) => {
     let compHTML = '';
+    let shown = pv;
+    const recebe = r.spill.filter(x => x.to === i);
+    if (recebe.length) {
+      compHTML += '<div class="comp-row"><span class="comp-part extra">+' + fmtNum(recebe.reduce((t, x) => t + x.amt, 0), 1)
+        + ' dos extras da ' + recebe.map(x => escapeHTML(d.provas[x.from].nome)).join(', ') + '</span></div>';
+      if (hasVal(pv.value)) shown = Object.assign({}, pv, { value: r.provasF[i] });
+    }
     if (temComp(pv)) {
       const partes = pv.comp.map(c => '<span class="comp-part' + (c.extra ? ' extra' : '') + '">'
         + escapeHTML(c.nome) + ' <b>' + (hasVal(c.value) ? fmtNum(c.value, 1) : '—') + '</b>'
         + '<span class="comp-max">/' + fmtNum(c.max, 1) + '</span></span>').join('');
-      const bruto = pv.comp.reduce((t, c) => t + (hasVal(c.value) ? c.value : 0), 0);
-      const perdido = hasVal(pv.value) && bruto > pv.max + 1e-9
-        ? '<span class="comp-lost">' + fmtNum(bruto - pv.max, 1) + ' acima do teto</span>' : '';
-      compHTML = '<div class="comp-row">' + partes + perdido + '</div>';
+      const bruto = compBruto(pv);
+      let nota = '';
+      if (hasVal(pv.value) && bruto > pv.max + 1e-9) {
+        shown = Object.assign({}, pv, { value: bruto });
+        const foi = r.spill.filter(x => x.from === i);
+        const amtFoi = foi.reduce((t, x) => t + x.amt, 0);
+        const pend = bruto - pv.max - amtFoi;
+        const outros = d.provas.filter((_, j) => j !== i).map(x => escapeHTML(x.nome)).join('/') || 'outra avaliação';
+        nota = (amtFoi > 1e-9 ? '<span class="comp-lost">+' + fmtNum(amtFoi, 1) + ' aplicado na ' + foi.map(x => escapeHTML(d.provas[x.to].nome)).join(', ') + '</span>' : '')
+          + (pend > 1e-9 ? '<span class="comp-lost">+' + fmtNum(pend, 1) + (r.spillPend > 1e-9 ? ' vai pra ' + outros + ' quando tiver nota/espaço' : '') + '</span>' : '');
+      }
+      compHTML += '<div class="comp-row">' + partes + nota + '</div>';
     }
     return '<div class="section">'
       + '<div class="section-title">' + escapeHTML(pv.nome) + ' <span class="section-max">máx ' + fmtNum(pv.max, 1) + '</span>'
       + '<button type="button" class="comp-edit" data-comp-edit="' + pv.id + '">' + (temComp(pv) ? 'composição' : '+ composição') + '</button></div>'
-      + '<div class="grade-row">' + gradeDisplay(pv, pv.max) + gradeActions(pv.id) + '</div>'
+      + '<div class="grade-row">' + gradeDisplay(shown, pv.max) + gradeActions(pv.id) + '</div>'
       + compHTML
       + '</div>';
   }).join('');
@@ -2496,7 +2547,7 @@ function renderSimDisc(d) {
     if (temComp(pv) && !hasVal(pv.value)) {
       const vals = (simD.comp && simD.comp[pv.id]) || {};
       return '<div class="sim-comp">'
-        + '<div class="sim-comp-head">' + escapeHTML(pv.nome) + ' <span>máx ' + fmtNum(pv.max, 1) + ', extras com teto</span></div>'
+        + '<div class="sim-comp-head">' + escapeHTML(pv.nome) + ' <span>máx ' + fmtNum(pv.max, 1) + ', o que passar vai pras outras avaliações</span></div>'
         + pv.comp.map(c => field('pc_' + pv.id + '|' + c.id, (c.extra ? '+ ' : '') + escapeHTML(c.nome), c.max, null, vals[c.id], c.extra ? 'extra' : '')).join('')
         + '</div>';
     }
@@ -2949,7 +3000,7 @@ function openModalGrade(tipo, isExpectativa) {
       const bruto = pv.comp.reduce((t, c) => t + (hasVal(vals[c.id]) ? vals[c.id] : 0), 0);
       const n = compNota(pv, vals);
       totEl.textContent = n === null ? 'nota da ' + label + ': —'
-        : 'nota da ' + label + ': ' + fmtNum(n, 1) + ' / ' + fmtNum(max, 1) + (bruto > max + 1e-9 ? ' (' + fmtNum(bruto - max, 1) + ' acima do teto)' : '');
+        : 'nota da ' + label + ': ' + fmtNum(Math.max(n, bruto), 1) + ' / ' + fmtNum(max, 1) + (bruto > max + 1e-9 ? ' (' + fmtNum(bruto - max, 1) + ' de extra transborda pra ' + (d.provas.filter(x => x !== pv).map(x => x.nome).join('/') || 'outra avaliação') + ')' : '');
     };
     document.querySelectorAll('.m-comp').forEach(i => i.addEventListener('input', upd));
     upd();
@@ -3035,7 +3086,7 @@ function openModalComposicao(pvId) {
   };
 
   openModal('Composição · ' + pv.nome + ' · ' + d.nome,
-    '<div id="m-comp-wrap"><p class="form-hint">as partes principais somam ' + fmtNum(pv.max, 1) + '. partes marcadas como extra cobrem o que faltou, e a ' + escapeHTML(pv.nome) + ' nunca passa de ' + fmtNum(pv.max, 1) + '.</p>'
+    '<div id="m-comp-wrap"><p class="form-hint">as partes principais somam ' + fmtNum(pv.max, 1) + '. partes marcadas como extra cobrem o que faltou; se a ' + escapeHTML(pv.nome) + ' passar de ' + fmtNum(pv.max, 1) + ' com os extras, o excesso vai automaticamente pras outras avaliações (AP1).</p>'
     + '<div class="comp-list" id="m-comp-list"></div>'
     + '<p class="form-hint" id="m-comp-sum"></p>'
     + '<button type="button" class="btn secondary sm" id="m-comp-add">+ parte</button>'

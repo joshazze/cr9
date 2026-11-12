@@ -47,10 +47,25 @@ try:
     # lança 37 + 4 = 41 → AP2 = 40 (teto)
     h.ev(f"openModalGrade('{pv2}', false)")
     h.ev("{ const ins = document.querySelectorAll('.m-comp'); ins[0].value = '37'; ins[1].value = '4'; ins[0].dispatchEvent(new Event('input')) }")
-    check("modal mostra o teto", "acima do teto" in (h.ev("document.getElementById('m-comp-tot').textContent") or ""))
+    check("modal avisa que o extra transborda", "transborda pra" in (h.ev("document.getElementById('m-comp-tot').textContent") or ""))
     shot(h, "v21_modal_nota_composta")
     h.ev("document.getElementById('modal-save').click()")
     check("AP2 = min(40, 37+4) = 40", h.ev(f"per().disciplinas.find(x => x.id === '{d_ap2}').provas[1].value") == 40)
+    D = f"per().disciplinas.find(x => x.id === '{d_ap2}')"
+    ap1 = h.ev(f"{D}.provas[0].value")
+    check("extra que passou de 40 vai pra AP1", abs(h.ev(f"calcDisc({D}).provasF[0]") - min(40, ap1 + 1)) < 1e-9,
+          str(h.ev(f"calcDisc({D}).provasF")))
+    check("detalhe mostra AP2 41/40", "41" in h.ev("document.querySelectorAll('#det-provas .grade-display')[1].textContent"))
+    check("detalhe avisa aplicado na AP1", "aplicado na AP1" in h.ev("document.getElementById('det-provas').textContent"))
+    check("AP1 mostra o que recebeu", "dos extras da AP2" in h.ev("document.getElementById('det-provas').textContent"))
+    shot(h, "v21_transborda_ap1")
+    # AP1 cheia (40): sobra fica pendente, não some nem estoura
+    h.ev(f"{D}.provas[0].value = 40; saveState(); renderDetalhe()")
+    check("AP1 cheia: nada passa de 40", h.ev(f"calcDisc({D}).provasF[0]") == 40 and h.ev(f"calcDisc({D}).spillPend") == 1)
+    h.ev(f"{D}.provas[0].value = {ap1}; saveState(); renderDetalhe()")
+    # sem extra não transborda: principal sozinha não passa de 40
+    check("sem extra, nada transborda",
+          h.ev(f"(() => {{ const d = JSON.parse(JSON.stringify({D})); d.provas[1].comp[1].value = 0; d.provas[1].comp[0].value = 40; d.provas[1].value = 40; return calcDisc(d).spill.length }})()") == 0)
     h.ev(f"openModalGrade('{pv2}', false)")
     h.ev("{ const ins = document.querySelectorAll('.m-comp'); ins[0].value = '33'; ins[1].value = '3.5' }")
     h.ev("document.getElementById('modal-save').click()")
@@ -75,6 +90,7 @@ try:
     h.ev("{ const ins = document.querySelectorAll('.sim-comp input'); ins[0].value = '38'; ins[0].dispatchEvent(new Event('input'));"
          " ins[1].value = '4'; ins[1].dispatchEvent(new Event('input')) }")
     check("sim compõe com teto (AP2 sim = 40)", h.ev(f"simState.disc['{d_ap2}'].provas['{pv2}']") == 40)
+    check("sim: extra transborda pra AP1", h.ev(f"calcDisc(per().disciplinas.find(x => x.id === '{d_ap2}'), simState.disc['{d_ap2}']).spill.length") == 1)
     h.ev("document.getElementById('sim-fill-range').value = 85; document.getElementById('sim-fill-range').dispatchEvent(new Event('input'));"
          " document.getElementById('btn-fill-pct-sim').click()")
     total85 = h.ev("calcPeriodo(simState).totalScore")
