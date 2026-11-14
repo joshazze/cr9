@@ -4,7 +4,7 @@ const KEY = 'cr9-v1';
 const MAX_RECENTES = 12;
 const MAX_LANCAMENTOS = 500;
 // Bumpar junto com CACHE_NAME do sw.js a cada deploy.
-const APP_VERSION = 'v23';
+const APP_VERSION = 'v24';
 
 // Regras Ibmec/Stars: disciplina vale 100 pts. Estrutura padrão AP1(40) +
 // AP2(40) + pool de AC(20), mas cada disciplina pode ter a sua (ex.: AT 60 +
@@ -572,17 +572,27 @@ function calcDisc(d, ov = {}, periodo = per()) {
   const ovc = ov.comp || {};
   const spill = [];
   let spillPend = 0;
+  // Simulador: prova sem composição também ganha extras separados (ov.provaExt),
+  // com a mesma regra: completa a própria prova e o resto transborda.
+  const ovx = ov.provaExt || {};
   d.provas.forEach((pv, i) => {
-    if (!temComp(pv) || finais[i] === null) return;
-    const simComp = ovp[pv.id] !== undefined && ovc[pv.id];
-    if (!simComp && !hasVal(pv.value)) return;
-    const vals = simComp ? ovc[pv.id] : null;
+    if (finais[i] === null) return;
     let princ = 0, ext = 0;
-    pv.comp.forEach(c => {
-      const v = vals ? vals[c.id] : c.value;
-      if (!hasVal(v)) return;
-      if (c.extra) ext += v; else princ += v;
-    });
+    if (temComp(pv)) {
+      const simComp = ovp[pv.id] !== undefined && ovc[pv.id];
+      if (!simComp && !hasVal(pv.value)) return;
+      const vals = simComp ? ovc[pv.id] : null;
+      pv.comp.forEach(c => {
+        const v = vals ? vals[c.id] : c.value;
+        if (!hasVal(v)) return;
+        if (c.extra) ext += v; else princ += v;
+      });
+    } else {
+      if (!hasVal(ovx[pv.id]) || ovx[pv.id] <= 0) return;
+      princ = finais[i];
+      ext = ovx[pv.id];
+      finais[i] = Math.min(pv.max, princ + ext);
+    }
     // Só extra transborda: a parte principal nunca passa do máximo.
     let sobra = Math.min(ext, Math.min(princ, pv.max) + ext - pv.max);
     if (sobra <= 1e-9) return;
@@ -2453,6 +2463,10 @@ function renderSimulador() {
         const n = pv ? compNota(pv, simD.comp[pvId]) : null;
         simD.provas[pvId] = n === null ? undefined : n;
       }
+      else if (key.startsWith('px_')) {
+        if (!simD.provaExt) simD.provaExt = {};
+        simD.provaExt[key.slice(3)] = v;
+      }
       else if (key === 'acExtra') simD.acExtra = v;
       inp.classList.toggle('filled', v !== undefined);
       refreshSimDisc(discId);
@@ -2559,6 +2573,15 @@ function renderSimDisc(d) {
           ? '<div class="sim-comp-sub">pontos extras</div>'
             + pv.comp.filter(c => c.extra).map(c => field('pc_' + pv.id + '|' + c.id, '+ ' + escapeHTML(c.nome), c.max, null, vals[c.id], 'extra')).join('')
           : '')
+        + '</div>';
+    }
+    if (!hasVal(pv.value)) {
+      const ex = simD.provaExt && simD.provaExt[pv.id];
+      return '<div class="sim-comp">'
+        + '<div class="sim-comp-head">' + escapeHTML(pv.nome) + ' <span>máx ' + fmtNum(pv.max, 1) + ', o extra que passar vai pras outras avaliações</span></div>'
+        + field('pv_' + pv.id, 'prova', pv.max, null, simD.provas && simD.provas[pv.id])
+        + '<div class="sim-comp-sub">pontos extras</div>'
+        + field('px_' + pv.id, '+ extras', pv.max, null, ex, 'extra')
         + '</div>';
     }
     return field('pv_' + pv.id, escapeHTML(pv.nome), pv.max, pv, simD.provas && simD.provas[pv.id]);

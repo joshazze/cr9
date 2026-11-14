@@ -91,10 +91,10 @@ try:
     # ── simulador ──
     h.ev("goto('s-simulador')")
     time.sleep(0.4)
-    check("simulador mostra campos da composição", h.ev("document.querySelectorAll('.sim-comp input').length") == 2)
+    check("simulador mostra campos da composição", h.ev(f"document.querySelectorAll('.sim-disc[data-disc=\"{d_ap2}\"] [data-key^=\"pc_\"]').length") == 2)
     check("barra real tem largura", h.ev("parseFloat(document.getElementById('sim-bar-real').style.width)") > 0)
     shot(h, "v21_simulador_vazio")
-    h.ev("{ const ins = document.querySelectorAll('.sim-comp input'); ins[0].value = '38'; ins[0].dispatchEvent(new Event('input'));"
+    h.ev("{ const ins = document.querySelectorAll('.sim-disc[data-disc=\"" + d_ap2 + "\"] [data-key^=\"pc_\"]'); ins[0].value = '38'; ins[0].dispatchEvent(new Event('input'));"
          " ins[1].value = '4'; ins[1].dispatchEvent(new Event('input')) }")
     check("sim compõe com teto (AP2 sim = 40)", h.ev(f"simState.disc['{d_ap2}'].provas['{pv2}']") == 40)
     check("sim: extra transborda pra AP1", h.ev(f"calcDisc(per().disciplinas.find(x => x.id === '{d_ap2}'), simState.disc['{d_ap2}']).spill.length") == 1)
