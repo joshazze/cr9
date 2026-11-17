@@ -2872,6 +2872,14 @@ header::before {
 .sim-field label small { font-size: 11px; color: var(--text-muted); font-weight: 400; }
 .sim-tag { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
 .sim-tag.prev { color: var(--warning); }
+.sim-field input.prev:not(.filled) { border-style: dashed; border-color: color-mix(in srgb, var(--warning) 55%, var(--border)); }
+.sim-gravar {
+  margin-left: 8px; padding: 2px 8px; border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, var(--border));
+  background: var(--accent-softer); color: var(--accent);
+  font: 600 10px/1.6 var(--sans); letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer;
+}
+.sim-gravar[hidden] { display: none; }
 .sim-field label:has(.sim-tag) { flex-direction: column; }
 .sim-field input.filled {
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
@@ -2961,3 +2969,13 @@ header::before {
   letter-spacing: 0.06em;
   color: var(--success);
 }
+
+.sim-ext-tog {
+  margin-left: 8px; padding: 2px 9px; border-radius: 999px; vertical-align: 1px;
+  border: 1px solid color-mix(in srgb, var(--success, #4a7c3a) 45%, var(--border));
+  background: color-mix(in srgb, var(--success, #4a7c3a) 10%, transparent);
+  color: var(--success, #4a7c3a);
+  font: 600 10px/1.6 var(--sans); letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer;
+}
+.sim-ext-tog.off { border-color: var(--border); background: transparent; color: var(--text-muted); text-decoration: line-through; }
+.sim-comp.sem-extra .sim-field.extra { opacity: 0.4; }

@@ -4,7 +4,7 @@ const KEY = 'cr9-v1';
 const MAX_RECENTES = 12;
 const MAX_LANCAMENTOS = 500;
 // Bumpar junto com CACHE_NAME do sw.js a cada deploy.
-const APP_VERSION = 'v24';
+const APP_VERSION = 'v26';
 
 // Regras Ibmec/Stars: disciplina vale 100 pts. Estrutura padrão AP1(40) +
 // AP2(40) + pool de AC(20), mas cada disciplina pode ter a sua (ex.: AT 60 +
@@ -379,6 +379,9 @@ function migrateState(s) {
             if (typeof c.value !== 'number') c.value = null;
           });
           if (!pv.comp.length) delete pv.comp;
+          // Só extra lançado, prova em branco: a avaliação continua vazia
+          // (os extras somam na nota, a prova segue simulável).
+          else if (pv.comp.some(c => c.extra && c.value !== null) && !pv.comp.some(c => !c.extra && c.value !== null)) pv.value = null;
         } else delete pv.comp;
       });
       if (typeof d.acPool !== 'number' || !(d.acPool >= 0)) d.acPool = AC_POOL;
@@ -513,6 +516,21 @@ function compNota(pv, vals) {
   });
   return algum ? Math.min(pv.max, soma) : null;
 }
+// Valores da composição com o que já está lançado por baixo do simulado.
+function compMerge(pv, vals) {
+  const m = {};
+  pv.comp.forEach(c => { m[c.id] = vals && vals[c.id] !== undefined ? vals[c.id] : c.value; });
+  return m;
+}
+// Nota da avaliação só quando alguma parte da PROVA tem valor: extra sozinho
+// não fecha a avaliação (fica vazia, extras somam à parte).
+function compNotaProva(pv, vals) {
+  const m = compMerge(pv, vals);
+  return pv.comp.some(c => !c.extra && hasVal(m[c.id])) ? compNota(pv, m) : null;
+}
+function compExtras(pv) {
+  return pv.comp.reduce((t, c) => t + (c.extra && hasVal(c.value) ? c.value : 0), 0);
+}
 function compBruto(pv) {
   return pv.comp.reduce((t, c) => t + (hasVal(c.value) ? c.value : 0), 0);
 }
@@ -552,16 +570,19 @@ function calcDisc(d, ov = {}, periodo = per()) {
   // fração se for melhor. No padrão (AP 40/40) é exatamente a regra antiga.
   const finais = vals.slice();
   const asM = asMaxDisc(d);
+  let asIdx = -1;
   if (hasVal(asv) && asM > 0 && finais.length) {
     const frac = asv / asM;
     const iVazia = finais.indexOf(null);
     if (iVazia >= 0) {
       finais[iVazia] = frac * d.provas[iVazia].max;
+      asIdx = iVazia;
     } else {
       let iMin = 0;
       for (let i = 1; i < finais.length; i++) {
         if (finais[i] / d.provas[i].max < finais[iMin] / d.provas[iMin].max) iMin = i;
       }
+      if (frac * d.provas[iMin].max > finais[iMin]) asIdx = iMin;
       finais[iMin] = Math.max(finais[iMin], frac * d.provas[iMin].max);
     }
   }
@@ -575,19 +596,41 @@ function calcDisc(d, ov = {}, periodo = per()) {
   // Simulador: prova sem composição também ganha extras separados (ov.provaExt),
   // com a mesma regra: completa a própria prova e o resto transborda.
   const ovx = ov.provaExt || {};
+  // Extras de avaliação com a prova ainda vazia: somam na nota sem distribuir.
+  let extraSolto = 0;
+  // Simulador: extras desligados por avaliação (ov.semExtra[pvId]).
+  const semExtra = ov.semExtra || {};
   d.provas.forEach((pv, i) => {
-    if (finais[i] === null) return;
     let princ = 0, ext = 0;
+    if (semExtra[pv.id]) {
+      if (finais[i] === null) return;
+      if (temComp(pv) && i !== asIdx) {
+        const simComp = ovp[pv.id] !== undefined && ovc[pv.id];
+        if (!simComp && !hasVal(pv.value)) return;
+        const m = compMerge(pv, simComp ? ovc[pv.id] : null);
+        finais[i] = Math.min(pv.max, pv.comp.reduce((t, c) => t + (!c.extra && hasVal(m[c.id]) ? m[c.id] : 0), 0));
+      }
+      return;
+    }
     if (temComp(pv)) {
       const simComp = ovp[pv.id] !== undefined && ovc[pv.id];
-      if (!simComp && !hasVal(pv.value)) return;
-      const vals = simComp ? ovc[pv.id] : null;
-      pv.comp.forEach(c => {
-        const v = vals ? vals[c.id] : c.value;
-        if (!hasVal(v)) return;
-        if (c.extra) ext += v; else princ += v;
-      });
+      if (simComp || hasVal(pv.value)) {
+        if (finais[i] === null) return;
+        const vals = compMerge(pv, simComp ? ovc[pv.id] : null);
+        pv.comp.forEach(c => {
+          const v = vals[c.id];
+          if (!hasVal(v)) return;
+          if (c.extra) ext += v; else princ += v;
+        });
+      } else {
+        ext = compExtras(pv);
+        if (ext <= 0) return;
+        if (finais[i] === null) { extraSolto += ext; return; }
+        princ = finais[i];
+        finais[i] = Math.min(pv.max, princ + ext);
+      }
     } else {
+      if (finais[i] === null) return;
       if (!hasVal(ovx[pv.id]) || ovx[pv.id] <= 0) return;
       princ = finais[i];
       ext = ovx[pv.id];
@@ -607,7 +650,7 @@ function calcDisc(d, ov = {}, periodo = per()) {
     if (sobra > 1e-9) spillPend += sobra;
   });
 
-  let provaEarned = 0, provaDist = 0;
+  let provaEarned = extraSolto, provaDist = 0;
   finais.forEach((v, i) => {
     if (v === null) return;
     provaEarned += v;
@@ -674,7 +717,9 @@ function calcDisc(d, ov = {}, periodo = per()) {
 // Mesma conta só com o que é OFICIAL: previsões de avaliação, AC, extra e TP
 // ficam de fora. É o gate do "garantido".
 function calcDiscOficialOnly(d, periodo = per()) {
-  const limpa = slot => slot.expectativa ? { ...slot, value: null } : slot;
+  const limpa = slot => slot.expectativa
+    ? { ...slot, value: null, ...(slot.comp ? { comp: slot.comp.map(c => ({ ...c, value: null })) } : {}) }
+    : slot;
   const dummy = {
     ...d,
     provas: d.provas.map(limpa),
@@ -2427,6 +2472,40 @@ function acRestante(d) {
   return Math.max(0, (d.acPool || 0) - d.acs.reduce((s, ac) => s + (ac.valor || 0), 0));
 }
 
+// Grava o valor simulado como a nova PREVISÃO do slot (nunca vira oficial)
+// e tira o override do simulado.
+function gravarPrevisaoSim(discId, key) {
+  const d = per().disciplinas.find(x => x.id === discId);
+  const simD = simState.disc && simState.disc[discId];
+  if (!d || !simD) return;
+  if (key.startsWith('pv_')) {
+    const pv = d.provas.find(x => x.id === key.slice(3));
+    const v = simD.provas[key.slice(3)];
+    if (!pv || !hasVal(v) || !pv.expectativa) return;
+    pv.value = v;
+    delete simD.provas[pv.id];
+  } else if (key.startsWith('pc_')) {
+    const [pvId, cId] = key.slice(3).split('|');
+    const pv = d.provas.find(x => x.id === pvId);
+    const c = pv && temComp(pv) && pv.comp.find(x => x.id === cId);
+    const v = simD.comp && simD.comp[pvId] && simD.comp[pvId][cId];
+    if (!c || !hasVal(v) || !pv.expectativa) return;
+    c.value = v;
+    pv.value = compNotaProva(pv);
+    delete simD.comp[pvId][cId];
+    if (Object.values(simD.comp[pvId]).some(hasVal)) simD.provas[pvId] = compNotaProva(pv, simD.comp[pvId]);
+    else { delete simD.comp[pvId]; delete simD.provas[pvId]; }
+  } else if (key.startsWith('ac_')) {
+    const ac = d.acs.find(x => x.id === key.slice(3));
+    const v = simD.acs[key.slice(3)];
+    if (!ac || !hasVal(v) || !ac.expectativa) return;
+    ac.value = v;
+    delete simD.acs[ac.id];
+  } else return;
+  saveDisc(d);
+  renderSimulador();
+}
+
 function renderSimulador() {
   renderHeader();
   const body = document.getElementById('sim-body');
@@ -2460,7 +2539,7 @@ function renderSimulador() {
         if (!simD.comp) simD.comp = {};
         if (!simD.comp[pvId]) simD.comp[pvId] = {};
         simD.comp[pvId][cId] = v;
-        const n = pv ? compNota(pv, simD.comp[pvId]) : null;
+        const n = pv ? compNotaProva(pv, simD.comp[pvId]) : null;
         simD.provas[pvId] = n === null ? undefined : n;
       }
       else if (key.startsWith('px_')) {
@@ -2469,8 +2548,28 @@ function renderSimulador() {
       }
       else if (key === 'acExtra') simD.acExtra = v;
       inp.classList.toggle('filled', v !== undefined);
+      const grava = inp.parentElement.querySelector('.sim-gravar');
+      if (grava) grava.hidden = v === undefined;
       refreshSimDisc(discId);
       updateSimResult();
+    });
+  });
+
+  body.querySelectorAll('.sim-ext-tog').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const simD = ensureSim(btn.dataset.disc);
+      if (!simD.semExtra) simD.semExtra = {};
+      simD.semExtra[btn.dataset.pv] = !simD.semExtra[btn.dataset.pv];
+      const y = window.scrollY;
+      renderSimulador();
+      window.scrollTo(0, y);
+    });
+  });
+
+  body.querySelectorAll('.sim-gravar').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.preventDefault();
+      gravarPrevisaoSim(btn.dataset.disc, btn.dataset.key);
     });
   });
 
@@ -2547,44 +2646,59 @@ function renderSimDisc(d) {
 
   const field = (key, label, max, realSlot, simVal, cls) => {
     const realVal = realSlot && hasVal(realSlot.value) ? realSlot.value : null;
-    const displayVal = realVal !== null ? fmtNum(realVal, 1) : (hasVal(simVal) ? simVal : '');
-    const readonly = realVal !== null ? 'readonly' : '';
+    // Previsão: editável aqui (só no simulado); "gravar" vira a nova previsão.
+    const isPrev = realVal !== null && realSlot.expectativa === true;
+    const mexido = isPrev && hasVal(simVal);
+    const displayVal = realVal === null ? (hasVal(simVal) ? simVal : '')
+      : isPrev ? (mexido ? simVal : realVal) : fmtNum(realVal, 1);
+    const readonly = realVal !== null && !isPrev ? 'readonly' : '';
     const placeholder = realVal !== null ? fmtNum(realVal, 1) : '—';
-    const tag = realVal !== null ? '<span class="sim-tag' + (realSlot.expectativa ? ' prev' : '') + '">' + (realSlot.expectativa ? 'prev' : 'lançada') + '</span>' : '';
+    const tag = realVal !== null ? '<span class="sim-tag' + (isPrev ? ' prev' : '') + '">' + (isPrev ? 'prev ' + fmtNum(realVal, 1) : 'lançada')
+      + (isPrev ? '<button type="button" class="sim-gravar" data-disc="' + d.id + '" data-key="' + key + '"' + (mexido ? '' : ' hidden') + '>gravar</button>' : '')
+      + '</span>' : '';
+    const cl = [realVal === null && hasVal(simVal) || mexido ? 'filled' : '', isPrev ? 'prev' : ''].filter(Boolean).join(' ');
     return '<div class="sim-field' + (cls ? ' ' + cls : '') + '">'
       + '<label>' + label + tag + '</label>'
       + '<input type="number" inputmode="decimal" step="0.1" min="0" max="' + max + '"'
       + ' data-disc="' + d.id + '" data-key="' + key + '"'
       + ' value="' + displayVal + '"'
       + ' placeholder="' + placeholder + '"'
-      + (realVal === null && hasVal(simVal) ? ' class="filled"' : '')
+      + (cl ? ' class="' + cl + '"' : '')
       + ' ' + readonly + '>'
       + '<span class="sim-max">/ ' + fmtNum(max, 1) + '</span>'
       + '</div>';
   };
 
+  const semEx = pv => !!(simD.semExtra && simD.semExtra[pv.id]);
+  const extBtn = pv => '<button type="button" class="sim-ext-tog' + (semEx(pv) ? ' off' : '') + '" data-disc="' + d.id + '" data-pv="' + pv.id + '">'
+    + (semEx(pv) ? 'extras desligados' : 'extras ligados') + '</button>';
   const provaFields = d.provas.map(pv => {
-    if (temComp(pv) && !hasVal(pv.value)) {
+    if (temComp(pv) && (!hasVal(pv.value) || pv.expectativa)) {
       const vals = (simD.comp && simD.comp[pv.id]) || {};
-      return '<div class="sim-comp">'
-        + '<div class="sim-comp-head">' + escapeHTML(pv.nome) + ' <span>máx ' + fmtNum(pv.max, 1) + ', o que passar vai pras outras avaliações</span></div>'
-        + pv.comp.filter(c => !c.extra).map(c => field('pc_' + pv.id + '|' + c.id, escapeHTML(c.nome), c.max, null, vals[c.id])).join('')
+      const lanc = c => hasVal(c.value) ? { value: c.value, expectativa: pv.expectativa } : null;
+      return '<div class="sim-comp' + (semEx(pv) ? ' sem-extra' : '') + '">'
+        + '<div class="sim-comp-head">' + escapeHTML(pv.nome) + extBtn(pv) + ' <span>máx ' + fmtNum(pv.max, 1) + ', o que passar vai pras outras avaliações</span></div>'
+        + pv.comp.filter(c => !c.extra).map(c => field('pc_' + pv.id + '|' + c.id, escapeHTML(c.nome), c.max, lanc(c), vals[c.id])).join('')
         + (pv.comp.some(c => c.extra)
           ? '<div class="sim-comp-sub">pontos extras</div>'
-            + pv.comp.filter(c => c.extra).map(c => field('pc_' + pv.id + '|' + c.id, '+ ' + escapeHTML(c.nome), c.max, null, vals[c.id], 'extra')).join('')
+            + pv.comp.filter(c => c.extra).map(c => field('pc_' + pv.id + '|' + c.id, '+ ' + escapeHTML(c.nome), c.max, lanc(c), vals[c.id], 'extra')).join('')
           : '')
         + '</div>';
     }
     if (!hasVal(pv.value)) {
       const ex = simD.provaExt && simD.provaExt[pv.id];
-      return '<div class="sim-comp">'
-        + '<div class="sim-comp-head">' + escapeHTML(pv.nome) + ' <span>máx ' + fmtNum(pv.max, 1) + ', o extra que passar vai pras outras avaliações</span></div>'
+      return '<div class="sim-comp' + (semEx(pv) ? ' sem-extra' : '') + '">'
+        + '<div class="sim-comp-head">' + escapeHTML(pv.nome) + extBtn(pv) + ' <span>máx ' + fmtNum(pv.max, 1) + ', o extra que passar vai pras outras avaliações</span></div>'
         + field('pv_' + pv.id, 'prova', pv.max, null, simD.provas && simD.provas[pv.id])
         + '<div class="sim-comp-sub">pontos extras</div>'
         + field('px_' + pv.id, '+ extras', pv.max, null, ex, 'extra')
         + '</div>';
     }
-    return field('pv_' + pv.id, escapeHTML(pv.nome), pv.max, pv, simD.provas && simD.provas[pv.id]);
+    const f = field('pv_' + pv.id, escapeHTML(pv.nome), pv.max, pv, simD.provas && simD.provas[pv.id]);
+    return temComp(pv) && compExtras(pv) > 0
+      ? '<div class="sim-comp' + (semEx(pv) ? ' sem-extra' : '') + '"><div class="sim-comp-head">' + escapeHTML(pv.nome) + extBtn(pv)
+        + ' <span>com +' + fmtNum(compExtras(pv), 1) + ' de extras lançados</span></div>' + f + '</div>'
+      : f;
   }).join('');
 
   let acFields = '';
@@ -2711,8 +2825,8 @@ function fillSim(frac) {
       if (temComp(pv)) {
         o.comp = o.comp || {};
         o.comp[pv.id] = {};
-        pv.comp.forEach(c => { o.comp[pv.id][c.id] = c.extra ? 0 : r1(frac * c.max); });
-        o.provas[pv.id] = compNota(pv, o.comp[pv.id]);
+        pv.comp.forEach(c => { if (!c.extra) o.comp[pv.id][c.id] = r1(frac * c.max); });
+        o.provas[pv.id] = compNotaProva(pv, o.comp[pv.id]);
       } else o.provas[pv.id] = r1(frac * pv.max);
     });
     if ((d.acMode || 'custom') === 'equal') {
@@ -2994,7 +3108,7 @@ function openModalGrade(tipo, isExpectativa) {
   const warnMsg = (isAS && !isExpectativa)
     ? '<p class="form-hint">Atenção: marcar AS oficial elimina sua elegibilidade ao Stars.</p>'
     : '';
-  const clearBtn = hasVal(slot.value)
+  const clearBtn = hasVal(slot.value) || (pv && temComp(pv) && compBruto(pv) > 0)
     ? '<button type="button" class="btn sm danger" id="m-clear">limpar nota</button>'
     : '';
 
@@ -3025,7 +3139,7 @@ function openModalGrade(tipo, isExpectativa) {
         const nota = compNota(pv, vals);
         if (nota === null) { alert('Preencha pelo menos uma parte.'); return false; }
         pv.comp.forEach(c => { c.value = vals[c.id]; });
-        pv.value = nota;
+        pv.value = compNotaProva(pv);
         pv.expectativa = isExpectativa;
         pushRecente({ discId: d.id, discNome: d.nome, tipo, label, valor: nota, max, kind: isExpectativa ? 'expectativa' : 'oficial' });
         saveDisc(d);
@@ -3171,7 +3285,7 @@ function openModalComposicao(pvId) {
         const p0 = pv.comp.find(c => !c.extra);
         if (p0) p0.value = Math.min(p0.max, pv.value);
       }
-      if (hasVal(pv.value)) pv.value = compNota(pv);
+      if (hasVal(pv.value) || compExtras(pv) > 0) pv.value = compNotaProva(pv);
       if (simState.disc) delete simState.disc[d.id];
       saveDisc(d);
       renderDetalhe();
